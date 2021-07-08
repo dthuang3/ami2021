@@ -1,3 +1,4 @@
+"use strict";
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -34,7 +35,7 @@ var __generator = (this && this.__generator) || function (thisArg, body) {
         if (op[0] & 5) throw op[1]; return { value: op[0] ? op[1] : void 0, done: true };
     }
 };
-var _this = this;
+exports.__esModule = true;
 var AerisWeather = require("@aerisweather/javascript-sdk").AerisWeather;
 var express = require("express");
 var port = 3000;
@@ -45,29 +46,49 @@ var got = require("got");
 var config = require("config");
 var _ = require("lodash");
 var util = require("./utils/utils.ts");
-var knex = require("knex");
+var knex = require("knex")({
+    client: "pg",
+    connection: {
+        host: "35.197.106.97",
+        user: "postgres",
+        password: "AmiIntern2021!",
+        database: "postgres"
+    }
+});
 app.use(express.json());
 app.use(express.urlencoded({
     extended: true
 }));
-// GET localhost:3000/weather?date="XXXXXXXX"&lat=xxx.xxx&lng=xxx.xxx
-app.get("/weather", function (request, response) { return __awaiter(_this, void 0, void 0, function () {
-    var params, url, result, periods, pop_avg, min_tmp, max_tmp, avg_tmp, err_1;
+// GET localhost:3000/weather?date="XXXXXXXX"&lat=xxx.xxx&lng=xxx.xxx?
+// GET localhost:3000/weather?date="xxxxxxxx"&WeatherStationID="xxxxx"
+app.get("/weather", function (request, response) { return __awaiter(void 0, void 0, void 0, function () {
+    var params, location_1, url, result, periods, pop_avg, min_tmp, max_tmp, avg_tmp, toInsert, err_1;
     return __generator(this, function (_a) {
         switch (_a.label) {
             case 0:
                 _a.trys.push([0, 3, , 4]);
-                // TODO: checking for valid params
                 // protect input parameters w/ validation check at beginning
                 // i.e. invalid date format, invalid latitude/longitude
                 // adding validation - prevent crashing
+                if (!util.isValidDate(request.query.date) ||
+                    (!util.isValidLat(request.query.lat) &&
+                        !util.isValidLng(request.query.lng) &&
+                        !request.query.WeatherStationID)) {
+                    throw new Error("invalid parameters");
+                }
                 // parse query body for parameters
                 console.log(request.query);
                 return [4 /*yield*/, util.parseQuery(request.query)];
             case 1:
                 params = _a.sent();
                 console.log(params);
-                url = "https://api.aerisapi.com/forecasts/" + params.lat + "," + params.lng + "?from=" + params.date + "&limit=14&client_id=" + config.get("AerisClient.ID") + "&client_secret=" + config.get("AerisClient.SECRET");
+                if (request.query.WeatherStationID) {
+                    location_1 = request.query.WeatherStationID;
+                }
+                else {
+                    location_1 = params.lat + "," + params.lng;
+                }
+                url = "https://api.aerisapi.com/forecasts/" + location_1 + "?from=" + params.date + "&limit=14&client_id=" + config.get("AerisClient.ID") + "&client_secret=" + config.get("AerisClient.SECRET");
                 return [4 /*yield*/, got(url)];
             case 2:
                 result = _a.sent();
@@ -76,6 +97,21 @@ app.get("/weather", function (request, response) { return __awaiter(_this, void 
                 min_tmp = _.minBy(periods, function (obj) { return obj.minTempF; }).minTempF;
                 max_tmp = _.maxBy(periods, function (obj) { return obj.maxTempF; }).maxTempF;
                 avg_tmp = _.meanBy(periods, function (obj) { return obj.avgTempF; });
+                toInsert = {
+                    date: request.query.date,
+                    latitude: request.query.lat,
+                    longitude: request.query.lng,
+                    pop: pop_avg,
+                    minTempF: min_tmp,
+                    maxTempF: max_tmp,
+                    avgTempF: avg_tmp,
+                    weatherStationId: request.query.WeatherStationID
+                };
+                knex("AMI")
+                    .insert(toInsert)
+                    .then(function () { return console.log("inserted to db"); })["catch"](function (err) {
+                    throw err;
+                });
                 response.send("Interval: 14(Days), POP: " + pop_avg + ", Min: " + min_tmp + ", Max: " + max_tmp + ", Avg: " + avg_tmp);
                 return [3 /*break*/, 4];
             case 3:
