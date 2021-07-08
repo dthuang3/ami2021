@@ -1,0 +1,14 @@
+{
+  "devDependencies": {
+    "@types/node": "^16.0.1"
+  },
+  "dependencies": {
+    "@aerisweather/javascript-sdk": "^1.5.1",
+    "axios": "^0.21.1",
+    "config": "^3.3.6",
+    "express": "^4.17.1",
+    "got": "^11.8.2",
+    "knex": "^0.95.6",
+    "prettier": "^2.3.2"
+  }
+}
