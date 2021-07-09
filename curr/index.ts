@@ -17,6 +17,8 @@ const knex = require("knex")({
     database: config.get("dbConfig.database"),
   },
 });
+const LRU = require("lru-cache");
+var cache = new LRU(2);
 
 app.use(express.json());
 app.use(
@@ -62,6 +64,7 @@ app.get("/weather", async (request, response) => {
     const result = await got(url);
 
     // parse aerisweather api response for pop, min, max, avg
+    // show all days 
     let periods: Object[] = JSON.parse(result.body)["response"][0]["periods"];
     const pop_avg: number = _.meanBy(periods, (obj) => obj.pop);
     const min_tmp: number = _.minBy(periods, (obj) => obj.minTempF).minTempF;
@@ -78,7 +81,10 @@ app.get("/weather", async (request, response) => {
       avgTempF: avg_tmp,
       weatherStationId: request.query.WeatherStationID,
     };
-    knex("AMI")
+    // if other queries are dependent on this knex call, use await
+    // interface of typescript
+    // knex<AAA>("aaa") ** important advantage for typescript
+    await knex("AMI")
       .insert(toInsert)
       .then(() => console.log("inserted to db"))
       .catch((err) => {
@@ -88,6 +94,61 @@ app.get("/weather", async (request, response) => {
     response.send(
       `Interval: 14(Days), POP: ${pop_avg}, Min: ${min_tmp}, Max: ${max_tmp}, Avg: ${avg_tmp}`
     );
+  } catch (err) {
+    console.error(err);
+    response.status(404).send("error");
+  }
+});
+
+// GET localhost:3000/getNearByWeatherStation?lat=xxxx.xxx&&lng=xx.xxx
+app.get("/getNearByWeatherStation", async (request, response) => {
+  try {
+    // parameter validation
+    if (
+      !utils.isValidLat(request.query.lat) ||
+      !utils.isValidLng(request.query.lng)
+    ) {
+      throw new Error("invalid location");
+    }
+
+    /*
+    console.log(`${request.query.lat},${request.query.lng}`);
+    cache.forEach((value, key, cache) => {
+      console.log("cache: " + key);
+    });
+    */
+
+    // if lat/lng pair was recently called - pull station info from cache
+    // qps - queries per second
+    // redis
+    
+    if (cache.has(`${request.query.lat},${request.query.lng}`)) {
+      response.send(cache.get(`${request.query.lat},${request.query.lng}`));
+    } else {
+      const url = `https://api.aerisapi.com/normals/stations/closest?p=${
+        request.query.lat
+      },${request.query.lng}&limit=20&&client_id=${config.get(
+        "AerisClient.ID"
+      )}&client_secret=${config.get("AerisClient.SECRET")}`;
+
+      // call aerisweather api
+      const json = await axios.get(url);
+
+      // parse for information
+      const station_info = _.map(json["data"]["response"], (station) => {
+        return {
+          WeaStationID: station.id,
+          country: station.place.country,
+          isPWS: _.startsWith(station.id, "pws"),
+          lat: station.loc.lat,
+          lng: station.loc.long,
+        };
+      });
+
+      // update cache
+      cache.set(`${request.query.lng},${request.query.lng}`, station_info);
+      response.send(station_info);
+    }
   } catch (err) {
     console.error(err);
     response.status(404).send("error");

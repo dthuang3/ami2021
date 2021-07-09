@@ -1,4 +1,3 @@
-"use strict";
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -35,7 +34,7 @@ var __generator = (this && this.__generator) || function (thisArg, body) {
         if (op[0] & 5) throw op[1]; return { value: op[0] ? op[1] : void 0, done: true };
     }
 };
-exports.__esModule = true;
+var _this = this;
 var AerisWeather = require("@aerisweather/javascript-sdk").AerisWeather;
 var express = require("express");
 var port = 3000;
@@ -45,23 +44,25 @@ var axios = require("axios");
 var got = require("got");
 var config = require("config");
 var _ = require("lodash");
-var util = require("./utils/utils.ts");
+var utils = require("./utils/utils.ts");
 var knex = require("knex")({
     client: "pg",
     connection: {
-        host: "35.197.106.97",
-        user: "postgres",
-        password: "AmiIntern2021!",
-        database: "postgres"
+        host: config.get("dbConfig.host"),
+        user: config.get("dbConfig.user"),
+        password: config.get("dbConfig.password"),
+        database: config.get("dbConfig.database")
     }
 });
+var LRU = require("lru-cache");
+var cache = new LRU(2);
 app.use(express.json());
 app.use(express.urlencoded({
     extended: true
 }));
 // GET localhost:3000/weather?date="XXXXXXXX"&lat=xxx.xxx&lng=xxx.xxx?
 // GET localhost:3000/weather?date="xxxxxxxx"&WeatherStationID="xxxxx"
-app.get("/weather", function (request, response) { return __awaiter(void 0, void 0, void 0, function () {
+app.get("/weather", function (request, response) { return __awaiter(_this, void 0, void 0, function () {
     var params, location_1, url, result, periods, pop_avg, min_tmp, max_tmp, avg_tmp, toInsert, err_1;
     return __generator(this, function (_a) {
         switch (_a.label) {
@@ -70,15 +71,15 @@ app.get("/weather", function (request, response) { return __awaiter(void 0, void
                 // protect input parameters w/ validation check at beginning
                 // i.e. invalid date format, invalid latitude/longitude
                 // adding validation - prevent crashing
-                if (!util.isValidDate(request.query.date) ||
-                    (!util.isValidLat(request.query.lat) &&
-                        !util.isValidLng(request.query.lng) &&
+                if (!utils.isValidDate(request.query.date) ||
+                    (!utils.isValidLat(request.query.lat) &&
+                        !utils.isValidLng(request.query.lng) &&
                         !request.query.WeatherStationID)) {
                     throw new Error("invalid parameters");
                 }
                 // parse query body for parameters
                 console.log(request.query);
-                return [4 /*yield*/, util.parseQuery(request.query)];
+                return [4 /*yield*/, utils.parseQuery(request.query)];
             case 1:
                 params = _a.sent();
                 console.log(params);
@@ -120,6 +121,49 @@ app.get("/weather", function (request, response) { return __awaiter(void 0, void
                 response.status(404).send("error");
                 return [3 /*break*/, 4];
             case 4: return [2 /*return*/];
+        }
+    });
+}); });
+// GET localhost:3000/getNearByWeatherStation?lat=xxxx.xxx&&lng=xx.xxx
+app.get("/getNearByWeatherStation", function (request, response) { return __awaiter(_this, void 0, void 0, function () {
+    var url, json, station_info, err_2;
+    return __generator(this, function (_a) {
+        switch (_a.label) {
+            case 0:
+                _a.trys.push([0, 4, , 5]);
+                // parameter validation
+                if (!utils.isValidLat(request.query.lat) ||
+                    !utils.isValidLng(request.query.lng)) {
+                    throw new Error("invalid location");
+                }
+                if (!cache.has(request.query.lat + "," + request.query.lng)) return [3 /*break*/, 1];
+                response.send(cache.get(request.query.lat + "," + request.query.lng));
+                return [3 /*break*/, 3];
+            case 1:
+                url = "https://api.aerisapi.com/normals/stations/closest?p=" + request.query.lat + "," + request.query.lng + "&limit=20&&client_id=" + config.get("AerisClient.ID") + "&client_secret=" + config.get("AerisClient.SECRET");
+                return [4 /*yield*/, axios.get(url)];
+            case 2:
+                json = _a.sent();
+                station_info = _.map(json["data"]["response"], function (station) {
+                    return {
+                        WeaStationID: station.id,
+                        country: station.place.country,
+                        isPWS: _.startsWith(station.id, "pws"),
+                        lat: station.loc.lat,
+                        lng: station.loc.long
+                    };
+                });
+                // update cache
+                cache.set(request.query.lng + "," + request.query.lng, station_info);
+                response.send(station_info);
+                _a.label = 3;
+            case 3: return [3 /*break*/, 5];
+            case 4:
+                err_2 = _a.sent();
+                console.error(err_2);
+                response.status(404).send("error");
+                return [3 /*break*/, 5];
+            case 5: return [2 /*return*/];
         }
     });
 }); });
