@@ -1,4 +1,5 @@
 const { AerisWeather } = require("@aerisweather/javascript-sdk");
+const { promisify } = require("util");
 const express = require("express");
 const port = 3000;
 const app = express();
@@ -17,8 +18,12 @@ const knex = require("knex")({
     database: config.get("dbConfig.database"),
   },
 });
-const LRU = require("lru-cache");
-var cache = new LRU(2);
+
+const redis = require("redis");
+const redis_port = 6379;
+
+const client = redis.createClient(redis_port);
+const getAsync = promisify(client.get).bind(client);
 
 app.use(express.json());
 app.use(
@@ -64,7 +69,7 @@ app.get("/weather", async (request, response) => {
     const result = await got(url);
 
     // parse aerisweather api response for pop, min, max, avg
-    // show all days 
+    // show all days
     let periods: Object[] = JSON.parse(result.body)["response"][0]["periods"];
     const pop_avg: number = _.meanBy(periods, (obj) => obj.pop);
     const min_tmp: number = _.minBy(periods, (obj) => obj.minTempF).minTempF;
@@ -121,34 +126,45 @@ app.get("/getNearByWeatherStation", async (request, response) => {
     // if lat/lng pair was recently called - pull station info from cache
     // qps - queries per second
     // redis
-    
-    if (cache.has(`${request.query.lat},${request.query.lng}`)) {
-      response.send(cache.get(`${request.query.lat},${request.query.lng}`));
-    } else {
-      const url = `https://api.aerisapi.com/normals/stations/closest?p=${
-        request.query.lat
-      },${request.query.lng}&limit=20&&client_id=${config.get(
-        "AerisClient.ID"
-      )}&client_secret=${config.get("AerisClient.SECRET")}`;
 
-      // call aerisweather api
-      const json = await axios.get(url);
+    client.get(
+      `${request.query.lat},${request.query.lng}`,
+      async (err, data) => {
+        if (err) throw err;
+        if (data !== null) {
+          console.log("fetching from cache");
+          response.json(data);
+        } else {
+          const url = `https://api.aerisapi.com/normals/stations/closest?p=${
+            request.query.lat
+          },${request.query.lng}&limit=20&&client_id=${config.get(
+            "AerisClient.ID"
+          )}&client_secret=${config.get("AerisClient.SECRET")}`;
 
-      // parse for information
-      const station_info = _.map(json["data"]["response"], (station) => {
-        return {
-          WeaStationID: station.id,
-          country: station.place.country,
-          isPWS: _.startsWith(station.id, "pws"),
-          lat: station.loc.lat,
-          lng: station.loc.long,
-        };
-      });
+          // call aerisweather api
+          const json = await axios.get(url);
 
-      // update cache
-      cache.set(`${request.query.lng},${request.query.lng}`, station_info);
-      response.send(station_info);
-    }
+          // parse for information
+          const station_info = _.map(json["data"]["response"], (station) => {
+            return {
+              WeaStationID: station.id,
+              country: station.place.country,
+              isPWS: _.startsWith(station.id, "pws"),
+              lat: station.loc.lat,
+              lng: station.loc.long,
+            };
+          });
+
+          // store to redis
+          client.setex(
+            `${request.query.lat},${request.query.lng}`,
+            3600,
+            JSON.stringify(station_info)
+          );
+          response.send(station_info);
+        }
+      }
+    );
   } catch (err) {
     console.error(err);
     response.status(404).send("error");

@@ -36,6 +36,7 @@ var __generator = (this && this.__generator) || function (thisArg, body) {
 };
 var _this = this;
 var AerisWeather = require("@aerisweather/javascript-sdk").AerisWeather;
+var promisify = require("util").promisify;
 var express = require("express");
 var port = 3000;
 var app = express();
@@ -54,8 +55,10 @@ var knex = require("knex")({
         database: config.get("dbConfig.database")
     }
 });
-var LRU = require("lru-cache");
-var cache = new LRU(2);
+var redis = require("redis");
+var redis_port = 6379;
+var client = redis.createClient(redis_port);
+var getAsync = promisify(client.get).bind(client);
 app.use(express.json());
 app.use(express.urlencoded({
     extended: true
@@ -67,7 +70,7 @@ app.get("/weather", function (request, response) { return __awaiter(_this, void 
     return __generator(this, function (_a) {
         switch (_a.label) {
             case 0:
-                _a.trys.push([0, 3, , 4]);
+                _a.trys.push([0, 4, , 5]);
                 // protect input parameters w/ validation check at beginning
                 // i.e. invalid date format, invalid latitude/longitude
                 // adding validation - prevent crashing
@@ -108,63 +111,88 @@ app.get("/weather", function (request, response) { return __awaiter(_this, void 
                     avgTempF: avg_tmp,
                     weatherStationId: request.query.WeatherStationID
                 };
-                knex("AMI")
-                    .insert(toInsert)
-                    .then(function () { return console.log("inserted to db"); })["catch"](function (err) {
-                    throw err;
-                });
-                response.send("Interval: 14(Days), POP: " + pop_avg + ", Min: " + min_tmp + ", Max: " + max_tmp + ", Avg: " + avg_tmp);
-                return [3 /*break*/, 4];
+                // if other queries are dependent on this knex call, use await
+                // interface of typescript
+                // knex<AAA>("aaa") ** important advantage for typescript
+                return [4 /*yield*/, knex("AMI")
+                        .insert(toInsert)
+                        .then(function () { return console.log("inserted to db"); })["catch"](function (err) {
+                        throw err;
+                    })];
             case 3:
+                // if other queries are dependent on this knex call, use await
+                // interface of typescript
+                // knex<AAA>("aaa") ** important advantage for typescript
+                _a.sent();
+                response.send("Interval: 14(Days), POP: " + pop_avg + ", Min: " + min_tmp + ", Max: " + max_tmp + ", Avg: " + avg_tmp);
+                return [3 /*break*/, 5];
+            case 4:
                 err_1 = _a.sent();
                 console.error(err_1);
                 response.status(404).send("error");
-                return [3 /*break*/, 4];
-            case 4: return [2 /*return*/];
+                return [3 /*break*/, 5];
+            case 5: return [2 /*return*/];
         }
     });
 }); });
 // GET localhost:3000/getNearByWeatherStation?lat=xxxx.xxx&&lng=xx.xxx
 app.get("/getNearByWeatherStation", function (request, response) { return __awaiter(_this, void 0, void 0, function () {
-    var url, json, station_info, err_2;
+    var _this = this;
     return __generator(this, function (_a) {
-        switch (_a.label) {
-            case 0:
-                _a.trys.push([0, 4, , 5]);
-                // parameter validation
-                if (!utils.isValidLat(request.query.lat) ||
-                    !utils.isValidLng(request.query.lng)) {
-                    throw new Error("invalid location");
-                }
-                if (!cache.has(request.query.lat + "," + request.query.lng)) return [3 /*break*/, 1];
-                response.send(cache.get(request.query.lat + "," + request.query.lng));
-                return [3 /*break*/, 3];
-            case 1:
-                url = "https://api.aerisapi.com/normals/stations/closest?p=" + request.query.lat + "," + request.query.lng + "&limit=20&&client_id=" + config.get("AerisClient.ID") + "&client_secret=" + config.get("AerisClient.SECRET");
-                return [4 /*yield*/, axios.get(url)];
-            case 2:
-                json = _a.sent();
-                station_info = _.map(json["data"]["response"], function (station) {
-                    return {
-                        WeaStationID: station.id,
-                        country: station.place.country,
-                        isPWS: _.startsWith(station.id, "pws"),
-                        lat: station.loc.lat,
-                        lng: station.loc.long
-                    };
+        try {
+            // parameter validation
+            if (!utils.isValidLat(request.query.lat) ||
+                !utils.isValidLng(request.query.lng)) {
+                throw new Error("invalid location");
+            }
+            /*
+            console.log(`${request.query.lat},${request.query.lng}`);
+            cache.forEach((value, key, cache) => {
+              console.log("cache: " + key);
+            });
+            */
+            // if lat/lng pair was recently called - pull station info from cache
+            // qps - queries per second
+            // redis
+            client.get(request.query.lat + "," + request.query.lng, function (err, data) { return __awaiter(_this, void 0, void 0, function () {
+                var url, json, station_info;
+                return __generator(this, function (_a) {
+                    switch (_a.label) {
+                        case 0:
+                            if (err)
+                                throw err;
+                            if (!(data !== null)) return [3 /*break*/, 1];
+                            console.log("fetching from cache");
+                            response.json(data);
+                            return [3 /*break*/, 3];
+                        case 1:
+                            url = "https://api.aerisapi.com/normals/stations/closest?p=" + request.query.lat + "," + request.query.lng + "&limit=20&&client_id=" + config.get("AerisClient.ID") + "&client_secret=" + config.get("AerisClient.SECRET");
+                            return [4 /*yield*/, axios.get(url)];
+                        case 2:
+                            json = _a.sent();
+                            station_info = _.map(json["data"]["response"], function (station) {
+                                return {
+                                    WeaStationID: station.id,
+                                    country: station.place.country,
+                                    isPWS: _.startsWith(station.id, "pws"),
+                                    lat: station.loc.lat,
+                                    lng: station.loc.long
+                                };
+                            });
+                            // store to redis
+                            client.setex(request.query.lat + "," + request.query.lng, 3600, JSON.stringify(station_info));
+                            response.send(station_info);
+                            _a.label = 3;
+                        case 3: return [2 /*return*/];
+                    }
                 });
-                // update cache
-                cache.set(request.query.lng + "," + request.query.lng, station_info);
-                response.send(station_info);
-                _a.label = 3;
-            case 3: return [3 /*break*/, 5];
-            case 4:
-                err_2 = _a.sent();
-                console.error(err_2);
-                response.status(404).send("error");
-                return [3 /*break*/, 5];
-            case 5: return [2 /*return*/];
+            }); });
         }
+        catch (err) {
+            console.error(err);
+            response.status(404).send("error");
+        }
+        return [2 /*return*/];
     });
 }); });
 app.listen(port);
