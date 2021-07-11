@@ -71,34 +71,28 @@ app.get("/weather", async (request, response) => {
     // parse aerisweather api response for pop, min, max, avg
     // show all days
     let periods: Object[] = JSON.parse(result.body)["response"][0]["periods"];
-    const pop_avg: number = _.meanBy(periods, (obj) => obj.pop);
-    const min_tmp: number = _.minBy(periods, (obj) => obj.minTempF).minTempF;
-    const max_tmp: number = _.maxBy(periods, (obj) => obj.maxTempF).maxTempF;
-    const avg_tmp: number = _.meanBy(periods, (obj) => obj.avgTempF);
-
-    const toInsert = {
-      date: request.query.date,
-      latitude: request.query.lat,
-      longitude: request.query.lng,
-      pop: pop_avg,
-      minTempF: min_tmp,
-      maxTempF: max_tmp,
-      avgTempF: avg_tmp,
-      weatherStationId: request.query.WeatherStationID,
-    };
-    // if other queries are dependent on this knex call, use await
-    // interface of typescript
-    // knex<AAA>("aaa") ** important advantage for typescript
-    await knex("AMI")
-      .insert(toInsert)
-      .then(() => console.log("inserted to db"))
-      .catch((err) => {
-        throw err;
-      });
-
-    response.send(
-      `Interval: 14(Days), POP: ${pop_avg}, Min: ${min_tmp}, Max: ${max_tmp}, Avg: ${avg_tmp}`
-    );
+    _.forEach(periods, async (value, key) => {
+      const weatherData = {
+        date: request.query.date,
+        latitude: request.query.lat,
+        longitude: request.query.lng,
+        pop: value.pop,
+        minTempF: value.minTempF,
+        maxTempF: value.maxTempF,
+        avgTempF: value.avgTempF,
+        weatherStationId: request.query.WeatherStationID,
+      };
+      // if other queries are dependent on this knex call, use await
+      // interface of typescript
+      // knex<AAA>("aaa") ** important advantage for typescript
+      await knex("AMI")
+        .insert(weatherData)
+        .then(() => console.log("inserted to db"))
+        .catch((err) => {
+          throw err;
+        });
+    });
+    response.json(periods);
   } catch (err) {
     console.error(err);
     response.status(404).send("error");

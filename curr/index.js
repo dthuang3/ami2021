@@ -66,11 +66,12 @@ app.use(express.urlencoded({
 // GET localhost:3000/weather?date="XXXXXXXX"&lat=xxx.xxx&lng=xxx.xxx?
 // GET localhost:3000/weather?date="xxxxxxxx"&WeatherStationID="xxxxx"
 app.get("/weather", function (request, response) { return __awaiter(_this, void 0, void 0, function () {
-    var params, location_1, url, result, periods, pop_avg, min_tmp, max_tmp, avg_tmp, toInsert, err_1;
+    var params, location_1, url, result, periods, err_1;
+    var _this = this;
     return __generator(this, function (_a) {
         switch (_a.label) {
             case 0:
-                _a.trys.push([0, 4, , 5]);
+                _a.trys.push([0, 3, , 4]);
                 // protect input parameters w/ validation check at beginning
                 // i.e. invalid date format, invalid latitude/longitude
                 // adding validation - prevent crashing
@@ -97,41 +98,46 @@ app.get("/weather", function (request, response) { return __awaiter(_this, void 
             case 2:
                 result = _a.sent();
                 periods = JSON.parse(result.body)["response"][0]["periods"];
-                pop_avg = _.meanBy(periods, function (obj) { return obj.pop; });
-                min_tmp = _.minBy(periods, function (obj) { return obj.minTempF; }).minTempF;
-                max_tmp = _.maxBy(periods, function (obj) { return obj.maxTempF; }).maxTempF;
-                avg_tmp = _.meanBy(periods, function (obj) { return obj.avgTempF; });
-                toInsert = {
-                    date: request.query.date,
-                    latitude: request.query.lat,
-                    longitude: request.query.lng,
-                    pop: pop_avg,
-                    minTempF: min_tmp,
-                    maxTempF: max_tmp,
-                    avgTempF: avg_tmp,
-                    weatherStationId: request.query.WeatherStationID
-                };
-                // if other queries are dependent on this knex call, use await
-                // interface of typescript
-                // knex<AAA>("aaa") ** important advantage for typescript
-                return [4 /*yield*/, knex("AMI")
-                        .insert(toInsert)
-                        .then(function () { return console.log("inserted to db"); })["catch"](function (err) {
-                        throw err;
-                    })];
+                _.forEach(periods, function (value, key) { return __awaiter(_this, void 0, void 0, function () {
+                    var weatherData;
+                    return __generator(this, function (_a) {
+                        switch (_a.label) {
+                            case 0:
+                                weatherData = {
+                                    date: request.query.date,
+                                    latitude: request.query.lat,
+                                    longitude: request.query.lng,
+                                    pop: value.pop,
+                                    minTempF: value.minTempF,
+                                    maxTempF: value.maxTempF,
+                                    avgTempF: value.avgTempF,
+                                    weatherStationId: request.query.WeatherStationID
+                                };
+                                // if other queries are dependent on this knex call, use await
+                                // interface of typescript
+                                // knex<AAA>("aaa") ** important advantage for typescript
+                                return [4 /*yield*/, knex("AMI")
+                                        .insert(weatherData)
+                                        .then(function () { return console.log("inserted to db"); })["catch"](function (err) {
+                                        throw err;
+                                    })];
+                            case 1:
+                                // if other queries are dependent on this knex call, use await
+                                // interface of typescript
+                                // knex<AAA>("aaa") ** important advantage for typescript
+                                _a.sent();
+                                return [2 /*return*/];
+                        }
+                    });
+                }); });
+                response.json(periods);
+                return [3 /*break*/, 4];
             case 3:
-                // if other queries are dependent on this knex call, use await
-                // interface of typescript
-                // knex<AAA>("aaa") ** important advantage for typescript
-                _a.sent();
-                response.send("Interval: 14(Days), POP: " + pop_avg + ", Min: " + min_tmp + ", Max: " + max_tmp + ", Avg: " + avg_tmp);
-                return [3 /*break*/, 5];
-            case 4:
                 err_1 = _a.sent();
                 console.error(err_1);
                 response.status(404).send("error");
-                return [3 /*break*/, 5];
-            case 5: return [2 /*return*/];
+                return [3 /*break*/, 4];
+            case 4: return [2 /*return*/];
         }
     });
 }); });
