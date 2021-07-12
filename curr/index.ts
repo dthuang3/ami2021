@@ -70,7 +70,7 @@ app.get("/weather", async (request, response) => {
 
     // parse aerisweather api response for pop, min, max, avg
     // show all days
-    let periods: Object[] = JSON.parse(result.body)["response"][0]["periods"];
+    const periods: Object[] = JSON.parse(result.body)["response"][0]["periods"];
     _.forEach(periods, async (value, key) => {
       const weatherData = {
         date: request.query.date,
@@ -110,44 +110,49 @@ app.get("/getNearByWeatherStation", async (request, response) => {
       throw new Error("invalid location");
     }
 
-    /*
-    console.log(`${request.query.lat},${request.query.lng}`);
-    cache.forEach((value, key, cache) => {
-      console.log("cache: " + key);
-    });
-    */
-
-    // if lat/lng pair was recently called - pull station info from cache
+    // if lat/lng pair was recently called - retrieve station info from cache
     // qps - queries per second
-    // redis
-
     client.get(
       `${request.query.lat},${request.query.lng}`,
       async (err, data) => {
         if (err) throw err;
         if (data !== null) {
           console.log("fetching from cache");
-          response.json(data);
+          response.send(JSON.parse(data));
         } else {
-          const url = `https://api.aerisapi.com/normals/stations/closest?p=${
-            request.query.lat
-          },${request.query.lng}&limit=20&&client_id=${config.get(
-            "AerisClient.ID"
-          )}&client_secret=${config.get("AerisClient.SECRET")}`;
+          const BroadenStationSearch = async (
+            location: string,
+            radius: number,
+            station_info_response
+          ) => {
+            // base case: if contains a station in search
+            if (station_info_response && station_info_response.length) {
+              return station_info_response;
+            }
 
-          // call aerisweather api
-          const json = await axios.get(url);
+            // call aerisweather api
+            const url = `https://api.aerisapi.com/normals/stations/closest?p=35.299710,-120.036436&limit=20&radius=${radius}miles&client_id=kMSjcZ18CGSlSqPbuBpi2&client_secret=q2vrQeLYpHr53Lgu7KmexxDnAdR3gHbXeeiJIE1K`;
 
-          // parse for information
-          const station_info = _.map(json["data"]["response"], (station) => {
-            return {
-              WeaStationID: station.id,
-              country: station.place.country,
-              isPWS: _.startsWith(station.id, "pws"),
-              lat: station.loc.lat,
-              lng: station.loc.long,
-            };
-          });
+            console.log(`searching at ${radius} miles`);
+            const json = await axios.get(url);
+            console.log(json["data"]["response"]);
+            const station_info = _.map(json["data"]["response"], (station) => {
+              return {
+                WeaStationID: station.id,
+                country: station.place.country,
+                isPWS: _.startsWith(station.id, "pws"),
+                lat: station.loc.lat,
+                lng: station.loc.long,
+              };
+            });
+            return BroadenStationSearch(location, radius + 10, station_info);
+          };
+
+          const station_info = await BroadenStationSearch(
+            `${request.query.lat},${request.query.lng}`,
+            20,
+            null
+          );
 
           // store to redis
           client.setex(

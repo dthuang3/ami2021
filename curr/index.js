@@ -151,17 +151,11 @@ app.get("/getNearByWeatherStation", function (request, response) { return __awai
                 !utils.isValidLng(request.query.lng)) {
                 throw new Error("invalid location");
             }
-            /*
-            console.log(`${request.query.lat},${request.query.lng}`);
-            cache.forEach((value, key, cache) => {
-              console.log("cache: " + key);
-            });
-            */
-            // if lat/lng pair was recently called - pull station info from cache
+            // if lat/lng pair was recently called - retrieve station info from cache
             // qps - queries per second
-            // redis
             client.get(request.query.lat + "," + request.query.lng, function (err, data) { return __awaiter(_this, void 0, void 0, function () {
-                var url, json, station_info;
+                var BroadenStationSearch_1, station_info;
+                var _this = this;
                 return __generator(this, function (_a) {
                     switch (_a.label) {
                         case 0:
@@ -169,22 +163,40 @@ app.get("/getNearByWeatherStation", function (request, response) { return __awai
                                 throw err;
                             if (!(data !== null)) return [3 /*break*/, 1];
                             console.log("fetching from cache");
-                            response.json(data);
+                            response.send(JSON.parse(data));
                             return [3 /*break*/, 3];
                         case 1:
-                            url = "https://api.aerisapi.com/normals/stations/closest?p=" + request.query.lat + "," + request.query.lng + "&limit=20&&client_id=" + config.get("AerisClient.ID") + "&client_secret=" + config.get("AerisClient.SECRET");
-                            return [4 /*yield*/, axios.get(url)];
+                            BroadenStationSearch_1 = function (location, radius, station_info_response) { return __awaiter(_this, void 0, void 0, function () {
+                                var url, json, station_info;
+                                return __generator(this, function (_a) {
+                                    switch (_a.label) {
+                                        case 0:
+                                            // base case: if contains a station in search
+                                            if (station_info_response && station_info_response.length) {
+                                                return [2 /*return*/, station_info_response];
+                                            }
+                                            url = "https://api.aerisapi.com/normals/stations/closest?p=35.299710,-120.036436&limit=20&radius=" + radius + "miles&client_id=kMSjcZ18CGSlSqPbuBpi2&client_secret=q2vrQeLYpHr53Lgu7KmexxDnAdR3gHbXeeiJIE1K";
+                                            console.log("searching at " + radius + " miles");
+                                            return [4 /*yield*/, axios.get(url)];
+                                        case 1:
+                                            json = _a.sent();
+                                            console.log(json["data"]["response"]);
+                                            station_info = _.map(json["data"]["response"], function (station) {
+                                                return {
+                                                    WeaStationID: station.id,
+                                                    country: station.place.country,
+                                                    isPWS: _.startsWith(station.id, "pws"),
+                                                    lat: station.loc.lat,
+                                                    lng: station.loc.long
+                                                };
+                                            });
+                                            return [2 /*return*/, BroadenStationSearch_1(location, radius + 10, station_info)];
+                                    }
+                                });
+                            }); };
+                            return [4 /*yield*/, BroadenStationSearch_1(request.query.lat + "," + request.query.lng, 20, null)];
                         case 2:
-                            json = _a.sent();
-                            station_info = _.map(json["data"]["response"], function (station) {
-                                return {
-                                    WeaStationID: station.id,
-                                    country: station.place.country,
-                                    isPWS: _.startsWith(station.id, "pws"),
-                                    lat: station.loc.lat,
-                                    lng: station.loc.long
-                                };
-                            });
+                            station_info = _a.sent();
                             // store to redis
                             client.setex(request.query.lat + "," + request.query.lng, 3600, JSON.stringify(station_info));
                             response.send(station_info);
