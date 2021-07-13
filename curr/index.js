@@ -153,7 +153,8 @@ app.get("/getNearByWeatherStation", function (request, response) { return __awai
             }
             // if lat/lng pair was recently called - retrieve station info from cache
             // qps - queries per second
-            client.get(request.query.lat + "," + request.query.lng, function (err, data) { return __awaiter(_this, void 0, void 0, function () {
+            // TODO: use promise/aysnc await
+            client.get(_.round(request.query.lat, 4) + "," + _.round(request.query.lng, 4), function (err, data) { return __awaiter(_this, void 0, void 0, function () {
                 var BroadenStationSearch_1, station_info;
                 var _this = this;
                 return __generator(this, function (_a) {
@@ -172,10 +173,11 @@ app.get("/getNearByWeatherStation", function (request, response) { return __awai
                                     switch (_a.label) {
                                         case 0:
                                             // base case: if contains a station in search
+                                            // TODO: add limitation range 100? miles
                                             if (station_info_response && station_info_response.length) {
                                                 return [2 /*return*/, station_info_response];
                                             }
-                                            url = "https://api.aerisapi.com/normals/stations/closest?p=35.299710,-120.036436&limit=20&radius=" + radius + "miles&client_id=kMSjcZ18CGSlSqPbuBpi2&client_secret=q2vrQeLYpHr53Lgu7KmexxDnAdR3gHbXeeiJIE1K";
+                                            url = "https://api.aerisapi.com//observations/summary/closest?p=" + _.round(request.query.lat, 4) + "," + _.round(request.query.lng, 4) + "&limit=20&radius=" + radius + "&client_id=kMSjcZ18CGSlSqPbuBpi2&client_secret=q2vrQeLYpHr53Lgu7KmexxDnAdR3gHbXeeiJIE1K";
                                             console.log("searching at " + radius + " miles");
                                             return [4 /*yield*/, axios.get(url)];
                                         case 1:
@@ -186,19 +188,20 @@ app.get("/getNearByWeatherStation", function (request, response) { return __awai
                                                     WeaStationID: station.id,
                                                     country: station.place.country,
                                                     isPWS: _.startsWith(station.id, "pws"),
-                                                    lat: station.loc.lat,
-                                                    lng: station.loc.long
+                                                    lat: _.round(station.loc.lat, 4),
+                                                    lng: _.round(station.loc.long, 4)
                                                 };
                                             });
                                             return [2 /*return*/, BroadenStationSearch_1(location, radius + 10, station_info)];
                                     }
                                 });
                             }); };
-                            return [4 /*yield*/, BroadenStationSearch_1(request.query.lat + "," + request.query.lng, 20, null)];
+                            return [4 /*yield*/, BroadenStationSearch_1(_.round(request.query.lat, 4) + "," + _.round(request.query.lng), 20, null)];
                         case 2:
                             station_info = _a.sent();
                             // store to redis
-                            client.setex(request.query.lat + "," + request.query.lng, 3600, JSON.stringify(station_info));
+                            // TODO: restrict lat/lng to 4 digits
+                            client.setex(_.round(request.query.lat) + "," + _.round(request.query.lng), 3600, JSON.stringify(station_info));
                             response.send(station_info);
                             _a.label = 3;
                         case 3: return [2 /*return*/];
@@ -214,4 +217,3 @@ app.get("/getNearByWeatherStation", function (request, response) { return __awai
     });
 }); });
 app.listen(port);
-// new comment

@@ -112,26 +112,36 @@ app.get("/getNearByWeatherStation", async (request, response) => {
 
     // if lat/lng pair was recently called - retrieve station info from cache
     // qps - queries per second
+    // TODO: use promise/aysnc await
     client.get(
-      `${request.query.lat},${request.query.lng}`,
+      `${_.round(request.query.lat, 4)},${_.round(request.query.lng, 4)}`,
       async (err, data) => {
         if (err) throw err;
         if (data !== null) {
           console.log("fetching from cache");
           response.send(JSON.parse(data));
         } else {
+          // TODO: move to curr/services/
+          // move from here
           const BroadenStationSearch = async (
             location: string,
             radius: number,
             station_info_response
           ) => {
             // base case: if contains a station in search
+            // TODO: add limitation range 100? miles
             if (station_info_response && station_info_response.length) {
               return station_info_response;
             }
 
             // call aerisweather api
-            const url = `https://api.aerisapi.com/normals/stations/closest?p=35.299710,-120.036436&limit=20&radius=${radius}miles&client_id=kMSjcZ18CGSlSqPbuBpi2&client_secret=q2vrQeLYpHr53Lgu7KmexxDnAdR3gHbXeeiJIE1K`;
+            const url = `https://api.aerisapi.com//observations/summary/closest?p=${_.round(
+              request.query.lat,
+              4
+            )},${_.round(
+              request.query.lng,
+              4
+            )}&limit=20&radius=${radius}&client_id=kMSjcZ18CGSlSqPbuBpi2&client_secret=q2vrQeLYpHr53Lgu7KmexxDnAdR3gHbXeeiJIE1K`;
 
             console.log(`searching at ${radius} miles`);
             const json = await axios.get(url);
@@ -141,22 +151,23 @@ app.get("/getNearByWeatherStation", async (request, response) => {
                 WeaStationID: station.id,
                 country: station.place.country,
                 isPWS: _.startsWith(station.id, "pws"),
-                lat: station.loc.lat,
-                lng: station.loc.long,
+                lat: _.round(station.loc.lat, 4),
+                lng: _.round(station.loc.long, 4),
               };
             });
             return BroadenStationSearch(location, radius + 10, station_info);
           };
 
           const station_info = await BroadenStationSearch(
-            `${request.query.lat},${request.query.lng}`,
+            `${_.round(request.query.lat, 4)},${_.round(request.query.lng)}`,
             20,
             null
           );
 
           // store to redis
+          // TODO: restrict lat/lng to 4 digits
           client.setex(
-            `${request.query.lat},${request.query.lng}`,
+            `${_.round(request.query.lat)},${_.round(request.query.lng)}`,
             3600,
             JSON.stringify(station_info)
           );
