@@ -1,3 +1,4 @@
+var _ = require("lodash")
 module.exports = {
   parseQuery: (query) => {
     const date_str = query.date.toString();
@@ -5,8 +6,8 @@ module.exports = {
     const month = date_str.substring(4, 6);
     const day = date_str.substring(6);
     const date = year + "/" + month + "/" + day;
-    const lat = parseFloat(query.lat);
-    const lng = parseFloat(query.lng);
+    const lat = _.round(parseFloat(query.lat), 4);
+    const lng = _.round(parseFloat(query.lng), 4);
     return { date, lat, lng };
   },
   isValidDate: (date) => {

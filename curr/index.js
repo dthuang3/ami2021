@@ -46,6 +46,7 @@ var got = require("got");
 var config = require("config");
 var _ = require("lodash");
 var utils = require("./utils/utils.ts");
+var services = require("./services/services.ts");
 var knex = require("knex")({
     client: "pg",
     connection: {
@@ -66,12 +67,12 @@ app.use(express.urlencoded({
 // GET localhost:3000/weather?date="XXXXXXXX"&lat=xxx.xxx&lng=xxx.xxx?
 // GET localhost:3000/weather?date="xxxxxxxx"&WeatherStationID="xxxxx"
 app.get("/weather", function (request, response) { return __awaiter(_this, void 0, void 0, function () {
-    var params, location_1, url, result, periods, err_1;
+    var params, location_1, url2, resp, url3, geohash, url4, obj_1, url, result, periods, err_1;
     var _this = this;
     return __generator(this, function (_a) {
         switch (_a.label) {
             case 0:
-                _a.trys.push([0, 3, , 4]);
+                _a.trys.push([0, 7, , 8]);
                 // protect input parameters w/ validation check at beginning
                 // i.e. invalid date format, invalid latitude/longitude
                 // adding validation - prevent crashing
@@ -81,8 +82,6 @@ app.get("/weather", function (request, response) { return __awaiter(_this, void 
                         !request.query.WeatherStationID)) {
                     throw new Error("invalid parameters");
                 }
-                // parse query body for parameters
-                console.log(request.query);
                 return [4 /*yield*/, utils.parseQuery(request.query)];
             case 1:
                 params = _a.sent();
@@ -93,9 +92,36 @@ app.get("/weather", function (request, response) { return __awaiter(_this, void 
                 else {
                     location_1 = params.lat + "," + params.lng;
                 }
+                url2 = "https://api.aerisapi.com/places/" + _.round(params.lat, 4) + "," + _.round(params.lng, 4) + "?client_id=" + config.get("AerisClient.ID") + "&client_secret=" + config.get("AerisClient.SECRET");
+                return [4 /*yield*/, axios.get(url2)];
+            case 2:
+                resp = _a.sent();
+                if (!(resp["data"]["response"]["place"]["countryFull"] === "Australia")) return [3 /*break*/, 5];
+                // finding geohash with place name
+                console.log(resp["data"]["response"]["place"]["name"]);
+                url3 = "https://api.weather.bom.gov.au/v1/locations?search=" + resp["data"]["response"]["place"]["name"];
+                return [4 /*yield*/, axios.get(url3)];
+            case 3:
+                resp = _a.sent();
+                geohash = resp["data"]["data"][0].geohash;
+                url4 = "https://api.weather.bom.gov.au/v1/locations/" + geohash + "/forecasts/daily";
+                return [4 /*yield*/, axios.get(url4)];
+            case 4:
+                resp = _a.sent();
+                obj_1 = { periods: [] };
+                _.forEach(resp["data"]["data"], function (value) { return __awaiter(_this, void 0, void 0, function () {
+                    return __generator(this, function (_a) {
+                        obj_1.periods.push("date: " + value.date.substring(0, 10) + ", pop: " + value.rain.chance + ", maxTempF: " + value.temp_max + ", minTempF: " + value.temp_min);
+                        return [2 /*return*/];
+                    });
+                }); });
+                console.log(JSON.stringify(obj_1));
+                response.send(JSON.stringify(obj_1, null, 2));
+                return [2 /*return*/];
+            case 5:
                 url = "https://api.aerisapi.com/forecasts/" + location_1 + "?from=" + params.date + "&limit=14&client_id=" + config.get("AerisClient.ID") + "&client_secret=" + config.get("AerisClient.SECRET");
                 return [4 /*yield*/, got(url)];
-            case 2:
+            case 6:
                 result = _a.sent();
                 periods = JSON.parse(result.body)["response"][0]["periods"];
                 _.forEach(periods, function (value, key) { return __awaiter(_this, void 0, void 0, function () {
@@ -104,9 +130,9 @@ app.get("/weather", function (request, response) { return __awaiter(_this, void 
                         switch (_a.label) {
                             case 0:
                                 weatherData = {
-                                    date: request.query.date,
-                                    latitude: request.query.lat,
-                                    longitude: request.query.lng,
+                                    date: value.validTime.substring(0, 10),
+                                    latitude: _.round(request.query.lat, 4),
+                                    longitude: _.round(request.query.lng, 4),
                                     pop: value.pop,
                                     minTempF: value.minTempF,
                                     maxTempF: value.maxTempF,
@@ -131,13 +157,13 @@ app.get("/weather", function (request, response) { return __awaiter(_this, void 
                     });
                 }); });
                 response.json(periods);
-                return [3 /*break*/, 4];
-            case 3:
+                return [3 /*break*/, 8];
+            case 7:
                 err_1 = _a.sent();
                 console.error(err_1);
                 response.status(404).send("error");
-                return [3 /*break*/, 4];
-            case 4: return [2 /*return*/];
+                return [3 /*break*/, 8];
+            case 8: return [2 /*return*/];
         }
     });
 }); });
@@ -201,7 +227,7 @@ app.get("/getNearByWeatherStation", function (request, response) { return __awai
                             station_info = _a.sent();
                             // store to redis
                             // TODO: restrict lat/lng to 4 digits
-                            client.setex(_.round(request.query.lat) + "," + _.round(request.query.lng), 3600, JSON.stringify(station_info));
+                            client.setex(_.round(request.query.lat, 4) + "," + _.round(request.query.lng, 4), 3600, JSON.stringify(station_info));
                             response.send(station_info);
                             _a.label = 3;
                         case 3: return [2 /*return*/];

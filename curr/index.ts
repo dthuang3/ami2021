@@ -4,11 +4,12 @@ const express = require("express");
 const port = 3000;
 const app = express();
 const bodyParser = require("body-parser");
-const axios = require("axios");
+var axios = require("axios");
 const got = require("got");
-const config = require("config");
-const _ = require("lodash");
+var config = require("config");
+var _ = require("lodash");
 const utils = require("./utils/utils.ts");
+const services = require("./services/services.ts");
 const knex = require("knex")({
   client: "pg",
   connection: {
@@ -49,7 +50,6 @@ app.get("/weather", async (request, response) => {
     }
 
     // parse query body for parameters
-    console.log(request.query);
     const params = await utils.parseQuery(request.query);
     console.log(params);
     let location;
@@ -57,6 +57,39 @@ app.get("/weather", async (request, response) => {
       location = request.query.WeatherStationID;
     } else {
       location = params.lat + "," + params.lng;
+    }
+
+    // checking if location is in australia
+    // takes in a lat/lng, finds location name with aerisweather api
+    const url2 = `https://api.aerisapi.com/places/${_.round(
+      params.lat,
+      4
+    )},${_.round(params.lng, 4)}?client_id=${config.get(
+      "AerisClient.ID"
+    )}&client_secret=${config.get("AerisClient.SECRET")}`;
+    let resp = await axios.get(url2);
+    if (resp["data"]["response"]["place"]["countryFull"] === "Australia") {
+      // finding geohash with place name
+      console.log(resp["data"]["response"]["place"]["name"]);
+      const url3 = `https://api.weather.bom.gov.au/v1/locations?search=${resp["data"]["response"]["place"]["name"]}`;
+      resp = await axios.get(url3);
+      const geohash = resp["data"]["data"][0].geohash;
+
+      // calling forecast with geohash
+      const url4 = `https://api.weather.bom.gov.au/v1/locations/${geohash}/forecasts/daily`;
+      resp = await axios.get(url4);
+
+      let obj = { periods: [] };
+      _.forEach(resp["data"]["data"], async (value) => {
+        obj.periods.push(
+          `date: ${value.date.substring(0, 10)}, pop: ${
+            value.rain.chance
+          }, maxTempF: ${value.temp_max}, minTempF: ${value.temp_min}`
+        );
+      });
+      console.log(JSON.stringify(obj));
+      response.send(JSON.stringify(obj, null, 2));
+      return;
     }
 
     // call aeris api
@@ -73,9 +106,9 @@ app.get("/weather", async (request, response) => {
     const periods: Object[] = JSON.parse(result.body)["response"][0]["periods"];
     _.forEach(periods, async (value, key) => {
       const weatherData = {
-        date: request.query.date,
-        latitude: request.query.lat,
-        longitude: request.query.lng,
+        date: value.validTime.substring(0, 10),
+        latitude: _.round(request.query.lat, 4),
+        longitude: _.round(request.query.lng, 4),
         pop: value.pop,
         minTempF: value.minTempF,
         maxTempF: value.maxTempF,
@@ -167,7 +200,7 @@ app.get("/getNearByWeatherStation", async (request, response) => {
           // store to redis
           // TODO: restrict lat/lng to 4 digits
           client.setex(
-            `${_.round(request.query.lat)},${_.round(request.query.lng)}`,
+            `${_.round(request.query.lat, 4)},${_.round(request.query.lng, 4)}`,
             3600,
             JSON.stringify(station_info)
           );
