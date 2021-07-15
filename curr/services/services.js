@@ -37,19 +37,74 @@ var __generator = (this && this.__generator) || function (thisArg, body) {
 var _this = this;
 var config = require("config");
 var axios = require("axios");
-var isInAustralia = function (lat, lng) { return __awaiter(_this, void 0, void 0, function () {
+var _ = require("lodash");
+var placeInAustralia = function (lat, lng) { return __awaiter(_this, void 0, void 0, function () {
+    var params, url, response;
+    return __generator(this, function (_a) {
+        switch (_a.label) {
+            case 0:
+                params = lat + "," + lng + "?";
+                url = config.get("url.aeris/places") + params + config.get("AerisClient.login");
+                return [4 /*yield*/, axios.get(url)];
+            case 1:
+                response = _a.sent();
+                // error handling empty australia response - get aeris backup
+                if (response["data"]["response"]["place"]["countryFull"] === "Australia") {
+                    return [2 /*return*/, response["data"]["response"]["place"]["name"]];
+                }
+                else {
+                    return [2 /*return*/, null];
+                }
+                return [2 /*return*/];
+        }
+    });
+}); };
+var BroadenStationSearch = function (lat, lng, radius, station_info_response) { return __awaiter(_this, void 0, void 0, function () {
+    var params, url, json, station_info;
+    return __generator(this, function (_a) {
+        switch (_a.label) {
+            case 0:
+                // base case: too many searches
+                // base case: station_info_response is not empty
+                if (radius >= 100 ||
+                    (station_info_response && station_info_response.length)) {
+                    return [2 /*return*/, station_info_response];
+                }
+                params = "?p=" + _.round(lat, 4) + "," + _.round(lng, 4) + "&limit=20&radius=" + radius + "&";
+                url = config.get("url.aeris/observations/summary") + params + config.get("AerisClient.login");
+                console.log("searching at " + radius + "miles");
+                return [4 /*yield*/, axios.get(url)];
+            case 1:
+                json = _a.sent();
+                console.log(json["data"]["response"]);
+                station_info = _.map(json["data"]["response"], function (station) {
+                    return {
+                        WeaStationID: station.id,
+                        country: station.place.country,
+                        isPWS: _.startsWith(station.id, "pws"),
+                        lat: _.round(station.loc.lat, 4),
+                        lng: _.round(station.loc.long, 4)
+                    };
+                });
+                return [2 /*return*/, BroadenStationSearch(lat, lng, radius + 10, station_info)];
+        }
+    });
+}); };
+var findGeohash = function (place) { return __awaiter(_this, void 0, void 0, function () {
     var url, response;
     return __generator(this, function (_a) {
         switch (_a.label) {
             case 0:
-                url = "https://api.aerisapi.com/places/" + lat + "," + lng + "?client_id=" + config.get("AerisClient.ID") + "&client_secret=" + config.get("AerisClient.SECRET");
+                url = config.get("au.geohash") + place;
                 return [4 /*yield*/, axios.get(url)];
             case 1:
                 response = _a.sent();
-                return [2 /*return*/, (response["data"]["response"]["place"]["countryFull"] === "Australia")];
+                return [2 /*return*/, response["data"]["data"][0].geohash];
         }
     });
 }); };
 module.exports = {
-    isInAustralia: isInAustralia
+    placeInAustralia: placeInAustralia,
+    BroadenStationSearch: BroadenStationSearch,
+    findGeohash: findGeohash
 };

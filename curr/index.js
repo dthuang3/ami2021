@@ -59,7 +59,7 @@ var knex = require("knex")({
 var redis = require("redis");
 var redis_port = 6379;
 var client = redis.createClient(redis_port);
-var getAsync = promisify(client.get).bind(client);
+var getAsync = promisify(client.hget).bind(client);
 app.use(express.json());
 app.use(express.urlencoded({
     extended: true
@@ -67,12 +67,12 @@ app.use(express.urlencoded({
 // GET localhost:3000/weather?date="XXXXXXXX"&lat=xxx.xxx&lng=xxx.xxx?
 // GET localhost:3000/weather?date="xxxxxxxx"&WeatherStationID="xxxxx"
 app.get("/weather", function (request, response) { return __awaiter(_this, void 0, void 0, function () {
-    var params, location_1, url2, resp, url3, geohash, url4, obj_1, url, result, periods, err_1;
+    var parameters, location_1, place_1, geohash_id, _a, place_geohash, bom_api, bom_info, obj_1, fields, url, result, periods, err_1;
     var _this = this;
-    return __generator(this, function (_a) {
-        switch (_a.label) {
+    return __generator(this, function (_b) {
+        switch (_b.label) {
             case 0:
-                _a.trys.push([0, 7, , 8]);
+                _b.trys.push([0, 11, , 12]);
                 // protect input parameters w/ validation check at beginning
                 // i.e. invalid date format, invalid latitude/longitude
                 // adding validation - prevent crashing
@@ -84,45 +84,78 @@ app.get("/weather", function (request, response) { return __awaiter(_this, void 
                 }
                 return [4 /*yield*/, utils.parseQuery(request.query)];
             case 1:
-                params = _a.sent();
-                console.log(params);
+                parameters = _b.sent();
+                console.log(parameters);
                 if (request.query.WeatherStationID) {
                     location_1 = request.query.WeatherStationID;
                 }
                 else {
-                    location_1 = params.lat + "," + params.lng;
+                    location_1 = parameters.lat + "," + parameters.lng;
                 }
-                url2 = "https://api.aerisapi.com/places/" + _.round(params.lat, 4) + "," + _.round(params.lng, 4) + "?client_id=" + config.get("AerisClient.ID") + "&client_secret=" + config.get("AerisClient.SECRET");
-                return [4 /*yield*/, axios.get(url2)];
+                return [4 /*yield*/, services.placeInAustralia(_.round(parameters.lat, 4), _.round(parameters.lng, 4))];
             case 2:
-                resp = _a.sent();
-                if (!(resp["data"]["response"]["place"]["countryFull"] === "Australia")) return [3 /*break*/, 5];
-                // finding geohash with place name
-                console.log(resp["data"]["response"]["place"]["name"]);
-                url3 = "https://api.weather.bom.gov.au/v1/locations?search=" + resp["data"]["response"]["place"]["name"];
-                return [4 /*yield*/, axios.get(url3)];
+                place_1 = _b.sent();
+                _a = Number;
+                return [4 /*yield*/, getAsync("geohashes", place_1)];
             case 3:
-                resp = _a.sent();
-                geohash = resp["data"]["data"][0].geohash;
-                url4 = "https://api.weather.bom.gov.au/v1/locations/" + geohash + "/forecasts/daily";
-                return [4 /*yield*/, axios.get(url4)];
+                geohash_id = _a.apply(void 0, [_b.sent()]);
+                if (!(place_1 && geohash_id)) return [3 /*break*/, 5];
+                return [4 /*yield*/, knex("australia locations")
+                        .select("geohash")
+                        .where("id", "=", Number(geohash_id))
+                        .then(function (gh) {
+                        response.send(gh);
+                    })];
             case 4:
-                resp = _a.sent();
+                _b.sent();
+                return [2 /*return*/];
+            case 5:
+                if (!place_1) return [3 /*break*/, 9];
+                return [4 /*yield*/, services.findGeohash(place_1)];
+            case 6:
+                place_geohash = _b.sent();
+                bom_api = config.get("au/forecast") + place_geohash + "forecasts/daily";
+                return [4 /*yield*/, axios.get(bom_api)];
+            case 7:
+                bom_info = _b.sent();
+                // storing geohash info into db
+                // camel style table name
+                // australiaLocations
+                return [4 /*yield*/, knex("australia locations")
+                        .returning("id")
+                        .insert({
+                        geohash: place_geohash,
+                        latitude: _.round(parameters.lat, 4),
+                        longitude: _.round(parameters.lng, 4),
+                        name: place_1
+                    })
+                        .then(function (id) {
+                        console.log("inserted geohash into db \n id: " + id);
+                        // storing into redis with (place, id) pairs
+                        client.hset("geohashes", place_1, id.toString());
+                    })["catch"](function (err) {
+                        throw err;
+                    })];
+            case 8:
+                // storing geohash info into db
+                // camel style table name
+                // australiaLocations
+                _b.sent();
                 obj_1 = { periods: [] };
-                _.forEach(resp["data"]["data"], function (value) { return __awaiter(_this, void 0, void 0, function () {
+                _.forEach(bom_info["data"]["data"], function (value) { return __awaiter(_this, void 0, void 0, function () {
                     return __generator(this, function (_a) {
                         obj_1.periods.push("date: " + value.date.substring(0, 10) + ", pop: " + value.rain.chance + ", maxTempF: " + value.temp_max + ", minTempF: " + value.temp_min);
                         return [2 /*return*/];
                     });
                 }); });
-                console.log(JSON.stringify(obj_1));
                 response.send(JSON.stringify(obj_1, null, 2));
                 return [2 /*return*/];
-            case 5:
-                url = "https://api.aerisapi.com/forecasts/" + location_1 + "?from=" + params.date + "&limit=14&client_id=" + config.get("AerisClient.ID") + "&client_secret=" + config.get("AerisClient.SECRET");
+            case 9:
+                fields = location_1 + "?from=" + parameters.date + "&limit=14&";
+                url = config.get("aeris/forecasts") + fields + config.get("AerisClient.login");
                 return [4 /*yield*/, got(url)];
-            case 6:
-                result = _a.sent();
+            case 10:
+                result = _b.sent();
                 periods = JSON.parse(result.body)["response"][0]["periods"];
                 _.forEach(periods, function (value, key) { return __awaiter(_this, void 0, void 0, function () {
                     var weatherData;
@@ -157,89 +190,54 @@ app.get("/weather", function (request, response) { return __awaiter(_this, void 
                     });
                 }); });
                 response.json(periods);
-                return [3 /*break*/, 8];
-            case 7:
-                err_1 = _a.sent();
+                return [3 /*break*/, 12];
+            case 11:
+                err_1 = _b.sent();
                 console.error(err_1);
                 response.status(404).send("error");
-                return [3 /*break*/, 8];
-            case 8: return [2 /*return*/];
+                return [3 /*break*/, 12];
+            case 12: return [2 /*return*/];
         }
     });
 }); });
 // GET localhost:3000/getNearByWeatherStation?lat=xxxx.xxx&&lng=xx.xxx
+// combining australia weather stations and aerisweather weather stations
 app.get("/getNearByWeatherStation", function (request, response) { return __awaiter(_this, void 0, void 0, function () {
-    var _this = this;
+    var foo, station_info, err_2;
     return __generator(this, function (_a) {
-        try {
-            // parameter validation
-            if (!utils.isValidLat(request.query.lat) ||
-                !utils.isValidLng(request.query.lng)) {
-                throw new Error("invalid location");
-            }
-            // if lat/lng pair was recently called - retrieve station info from cache
-            // qps - queries per second
-            // TODO: use promise/aysnc await
-            client.get(_.round(request.query.lat, 4) + "," + _.round(request.query.lng, 4), function (err, data) { return __awaiter(_this, void 0, void 0, function () {
-                var BroadenStationSearch_1, station_info;
-                var _this = this;
-                return __generator(this, function (_a) {
-                    switch (_a.label) {
-                        case 0:
-                            if (err)
-                                throw err;
-                            if (!(data !== null)) return [3 /*break*/, 1];
-                            console.log("fetching from cache");
-                            response.send(JSON.parse(data));
-                            return [3 /*break*/, 3];
-                        case 1:
-                            BroadenStationSearch_1 = function (location, radius, station_info_response) { return __awaiter(_this, void 0, void 0, function () {
-                                var url, json, station_info;
-                                return __generator(this, function (_a) {
-                                    switch (_a.label) {
-                                        case 0:
-                                            // base case: if contains a station in search
-                                            // TODO: add limitation range 100? miles
-                                            if (station_info_response && station_info_response.length) {
-                                                return [2 /*return*/, station_info_response];
-                                            }
-                                            url = "https://api.aerisapi.com//observations/summary/closest?p=" + _.round(request.query.lat, 4) + "," + _.round(request.query.lng, 4) + "&limit=20&radius=" + radius + "&client_id=kMSjcZ18CGSlSqPbuBpi2&client_secret=q2vrQeLYpHr53Lgu7KmexxDnAdR3gHbXeeiJIE1K";
-                                            console.log("searching at " + radius + " miles");
-                                            return [4 /*yield*/, axios.get(url)];
-                                        case 1:
-                                            json = _a.sent();
-                                            console.log(json["data"]["response"]);
-                                            station_info = _.map(json["data"]["response"], function (station) {
-                                                return {
-                                                    WeaStationID: station.id,
-                                                    country: station.place.country,
-                                                    isPWS: _.startsWith(station.id, "pws"),
-                                                    lat: _.round(station.loc.lat, 4),
-                                                    lng: _.round(station.loc.long, 4)
-                                                };
-                                            });
-                                            return [2 /*return*/, BroadenStationSearch_1(location, radius + 10, station_info)];
-                                    }
-                                });
-                            }); };
-                            return [4 /*yield*/, BroadenStationSearch_1(_.round(request.query.lat, 4) + "," + _.round(request.query.lng), 20, null)];
-                        case 2:
-                            station_info = _a.sent();
-                            // store to redis
-                            // TODO: restrict lat/lng to 4 digits
-                            client.setex(_.round(request.query.lat, 4) + "," + _.round(request.query.lng, 4), 3600, JSON.stringify(station_info));
-                            response.send(station_info);
-                            _a.label = 3;
-                        case 3: return [2 /*return*/];
-                    }
-                });
-            }); });
+        switch (_a.label) {
+            case 0:
+                _a.trys.push([0, 6, , 7]);
+                // parameter validation
+                if (!utils.isValidLat(request.query.lat) ||
+                    !utils.isValidLng(request.query.lng)) {
+                    throw new Error("invalid location");
+                }
+                return [4 /*yield*/, getAsync("stations", _.round(request.query.lat, 4) + "," + _.round(request.query.lng, 4))];
+            case 1:
+                foo = _a.sent();
+                console.log(foo);
+                if (!foo) return [3 /*break*/, 2];
+                response.send(JSON.parse(foo));
+                return [2 /*return*/];
+            case 2: return [4 /*yield*/, services.BroadenStationSearch(_.round(request.query.lat, 4), _.round(request.query.lng, 4), 20, null)];
+            case 3:
+                station_info = _a.sent();
+                // store to redis
+                return [4 /*yield*/, client.hset("stations", _.round(request.query.lat, 4) + "," + _.round(request.query.lng, 4), JSON.stringify(station_info))];
+            case 4:
+                // store to redis
+                _a.sent();
+                response.send(station_info);
+                _a.label = 5;
+            case 5: return [3 /*break*/, 7];
+            case 6:
+                err_2 = _a.sent();
+                console.error(err_2);
+                response.status(404).send("error");
+                return [3 /*break*/, 7];
+            case 7: return [2 /*return*/];
         }
-        catch (err) {
-            console.error(err);
-            response.status(404).send("error");
-        }
-        return [2 /*return*/];
     });
 }); });
 app.listen(port);

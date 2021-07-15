@@ -24,7 +24,7 @@ const redis = require("redis");
 const redis_port = 6379;
 
 const client = redis.createClient(redis_port);
-const getAsync = promisify(client.get).bind(client);
+const getAsync = promisify(client.hget).bind(client);
 
 app.use(express.json());
 app.use(
@@ -50,55 +50,72 @@ app.get("/weather", async (request, response) => {
     }
 
     // parse query body for parameters
-    const params = await utils.parseQuery(request.query);
-    console.log(params);
+    const parameters = await utils.parseQuery(request.query);
+    console.log(parameters);
     let location;
     if (request.query.WeatherStationID) {
       location = request.query.WeatherStationID;
     } else {
-      location = params.lat + "," + params.lng;
+      location = parameters.lat + "," + parameters.lng;
     }
 
     // checking if location is in australia
     // takes in a lat/lng, finds location name with aerisweather api
-    const url2 = `https://api.aerisapi.com/places/${_.round(
-      params.lat,
-      4
-    )},${_.round(params.lng, 4)}?client_id=${config.get(
-      "AerisClient.ID"
-    )}&client_secret=${config.get("AerisClient.SECRET")}`;
-    let resp = await axios.get(url2);
-    if (resp["data"]["response"]["place"]["countryFull"] === "Australia") {
-      // finding geohash with place name
-      console.log(resp["data"]["response"]["place"]["name"]);
-      const url3 = `https://api.weather.bom.gov.au/v1/locations?search=${resp["data"]["response"]["place"]["name"]}`;
-      resp = await axios.get(url3);
-      const geohash = resp["data"]["data"][0].geohash;
+    const place = await services.placeInAustralia(
+      _.round(parameters.lat, 4),
+      _.round(parameters.lng, 4)
+    );
 
-      // calling forecast with geohash
-      const url4 = `https://api.weather.bom.gov.au/v1/locations/${geohash}/forecasts/daily`;
-      resp = await axios.get(url4);
+    // checking if in cache/db
+    const geohash_id = Number(await getAsync("geohashes", place));
+    if (place && geohash_id) {
+      await knex("australia locations")
+        .select("geohash")
+        .where("id", "=", Number(geohash_id))
+        .then((gh) => {
+          response.send(gh);
+        });
+      return;
+    } else if (place) {
+      const place_geohash = await services.findGeohash(place);
+      const bom_api = config.get("au/forecast") + place_geohash + "forecasts/daily";
+      const bom_info = await axios.get(bom_api);
+      // storing geohash info into db
+      // camel style table name
+      // australiaLocations
+      await knex("australia locations")
+        .returning("id")
+        .insert({
+          geohash: place_geohash,
+          latitude: _.round(parameters.lat, 4),
+          longitude: _.round(parameters.lng, 4),
+          name: place,
+        })
+        .then((id) => {
+          console.log("inserted geohash into db \n id: " + id);
+          // storing into redis with (place, id) pairs
+          client.hset("geohashes", place, id.toString());
+        })
+        .catch((err) => {
+          throw err;
+        });
 
       let obj = { periods: [] };
-      _.forEach(resp["data"]["data"], async (value) => {
+      _.forEach(bom_info["data"]["data"], async (value) => {
         obj.periods.push(
           `date: ${value.date.substring(0, 10)}, pop: ${
             value.rain.chance
           }, maxTempF: ${value.temp_max}, minTempF: ${value.temp_min}`
         );
       });
-      console.log(JSON.stringify(obj));
       response.send(JSON.stringify(obj, null, 2));
       return;
     }
 
     // call aeris api
-    // axios
-    const url = `https://api.aerisapi.com/forecasts/${location}?from=${
-      params.date
-    }&limit=14&client_id=${config.get(
-      "AerisClient.ID"
-    )}&client_secret=${config.get("AerisClient.SECRET")}`;
+    // TODO: switch from got to axios
+    const fields = `${location}?from=${parameters.date}&limit=14&`;
+    const url = config.get("aeris/forecasts") + fields + config.get("AerisClient.login");
     const result = await got(url);
 
     // parse aerisweather api response for pop, min, max, avg
@@ -133,6 +150,7 @@ app.get("/weather", async (request, response) => {
 });
 
 // GET localhost:3000/getNearByWeatherStation?lat=xxxx.xxx&&lng=xx.xxx
+// combining australia weather stations and aerisweather weather stations
 app.get("/getNearByWeatherStation", async (request, response) => {
   try {
     // parameter validation
@@ -146,68 +164,30 @@ app.get("/getNearByWeatherStation", async (request, response) => {
     // if lat/lng pair was recently called - retrieve station info from cache
     // qps - queries per second
     // TODO: use promise/aysnc await
-    client.get(
-      `${_.round(request.query.lat, 4)},${_.round(request.query.lng, 4)}`,
-      async (err, data) => {
-        if (err) throw err;
-        if (data !== null) {
-          console.log("fetching from cache");
-          response.send(JSON.parse(data));
-        } else {
-          // TODO: move to curr/services/
-          // move from here
-          const BroadenStationSearch = async (
-            location: string,
-            radius: number,
-            station_info_response
-          ) => {
-            // base case: if contains a station in search
-            // TODO: add limitation range 100? miles
-            if (station_info_response && station_info_response.length) {
-              return station_info_response;
-            }
-
-            // call aerisweather api
-            const url = `https://api.aerisapi.com//observations/summary/closest?p=${_.round(
-              request.query.lat,
-              4
-            )},${_.round(
-              request.query.lng,
-              4
-            )}&limit=20&radius=${radius}&client_id=kMSjcZ18CGSlSqPbuBpi2&client_secret=q2vrQeLYpHr53Lgu7KmexxDnAdR3gHbXeeiJIE1K`;
-
-            console.log(`searching at ${radius} miles`);
-            const json = await axios.get(url);
-            console.log(json["data"]["response"]);
-            const station_info = _.map(json["data"]["response"], (station) => {
-              return {
-                WeaStationID: station.id,
-                country: station.place.country,
-                isPWS: _.startsWith(station.id, "pws"),
-                lat: _.round(station.loc.lat, 4),
-                lng: _.round(station.loc.long, 4),
-              };
-            });
-            return BroadenStationSearch(location, radius + 10, station_info);
-          };
-
-          const station_info = await BroadenStationSearch(
-            `${_.round(request.query.lat, 4)},${_.round(request.query.lng)}`,
-            20,
-            null
-          );
-
-          // store to redis
-          // TODO: restrict lat/lng to 4 digits
-          client.setex(
-            `${_.round(request.query.lat, 4)},${_.round(request.query.lng, 4)}`,
-            3600,
-            JSON.stringify(station_info)
-          );
-          response.send(station_info);
-        }
-      }
+    const foo = await getAsync(
+      "stations",
+      `${_.round(request.query.lat, 4)},${_.round(request.query.lng, 4)}`
     );
+    console.log(foo);
+    if (foo) {
+      response.send(JSON.parse(foo));
+      return;
+    } else {
+      // search for 20 closest weather stations
+      const station_info = await services.BroadenStationSearch(
+        _.round(request.query.lat, 4),
+        _.round(request.query.lng, 4),
+        20,
+        null
+      );
+      // store to redis
+      await client.hset(
+        "stations",
+        `${_.round(request.query.lat, 4)},${_.round(request.query.lng, 4)}`,
+        JSON.stringify(station_info)
+      );
+      response.send(station_info);
+    }
   } catch (err) {
     console.error(err);
     response.status(404).send("error");
