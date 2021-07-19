@@ -56,6 +56,7 @@ var knex = require("knex")({
         database: config.get("dbConfig.database")
     }
 });
+var geohash_ = require("ngeohash");
 var redis = require("redis");
 var redis_port = 6379;
 var client = redis.createClient(redis_port);
@@ -67,24 +68,22 @@ app.use(express.urlencoded({
 // GET localhost:3000/weather?date="XXXXXXXX"&lat=xxx.xxx&lng=xxx.xxx?
 // GET localhost:3000/weather?date="xxxxxxxx"&WeatherStationID="xxxxx"
 app.get("/weather", function (request, response) { return __awaiter(_this, void 0, void 0, function () {
-    var parameters, location_1, place_1, geohash_id, _a, place_geohash, bom_api, bom_info, obj_1, fields, url, result, periods, err_1;
+    var parameters, location_1, place, place_geohash, bom_api, bom_info, obj_1, fields, url, result, periods, err_1;
     var _this = this;
-    return __generator(this, function (_b) {
-        switch (_b.label) {
+    return __generator(this, function (_a) {
+        switch (_a.label) {
             case 0:
-                _b.trys.push([0, 11, , 12]);
+                _a.trys.push([0, 8, , 9]);
                 // protect input parameters w/ validation check at beginning
-                // i.e. invalid date format, invalid latitude/longitude
+                // e.g. invalid date format, invalid latitude/longitude
                 // adding validation - prevent crashing
                 if (!utils.isValidDate(request.query.date) ||
-                    (!utils.isValidLat(request.query.lat) &&
-                        !utils.isValidLng(request.query.lng) &&
-                        !request.query.WeatherStationID)) {
+                    (!utils.isValidLat(request.query.lat) && !utils.isValidLng(request.query.lng) && !request.query.WeatherStationID)) {
                     throw new Error("invalid parameters");
                 }
                 return [4 /*yield*/, utils.parseQuery(request.query)];
             case 1:
-                parameters = _b.sent();
+                parameters = _a.sent();
                 console.log(parameters);
                 if (request.query.WeatherStationID) {
                     location_1 = request.query.WeatherStationID;
@@ -94,30 +93,17 @@ app.get("/weather", function (request, response) { return __awaiter(_this, void 
                 }
                 return [4 /*yield*/, services.placeInAustralia(_.round(parameters.lat, 4), _.round(parameters.lng, 4))];
             case 2:
-                place_1 = _b.sent();
-                _a = Number;
-                return [4 /*yield*/, getAsync("geohashes", place_1)];
+                place = _a.sent();
+                if (!place) return [3 /*break*/, 6];
+                return [4 /*yield*/, services.findGeohash(place)];
             case 3:
-                geohash_id = _a.apply(void 0, [_b.sent()]);
-                if (!(place_1 && geohash_id)) return [3 /*break*/, 5];
-                return [4 /*yield*/, knex("australia locations")
-                        .select("geohash")
-                        .where("id", "=", Number(geohash_id))
-                        .then(function (gh) {
-                        response.send(gh);
-                    })];
-            case 4:
-                _b.sent();
-                return [2 /*return*/];
-            case 5:
-                if (!place_1) return [3 /*break*/, 9];
-                return [4 /*yield*/, services.findGeohash(place_1)];
-            case 6:
-                place_geohash = _b.sent();
-                bom_api = config.get("au/forecast") + place_geohash + "forecasts/daily";
+                place_geohash = _a.sent();
+                console.log(geohash_.encode(_.round(parameters.lat, 4), _.round(parameters.lng, 4), 7));
+                console.log(place_geohash);
+                bom_api = config.get("url.au/forecasts") + place_geohash + "/forecasts/daily";
                 return [4 /*yield*/, axios.get(bom_api)];
-            case 7:
-                bom_info = _b.sent();
+            case 4:
+                bom_info = _a.sent();
                 // storing geohash info into db
                 // camel style table name
                 // australiaLocations
@@ -127,20 +113,19 @@ app.get("/weather", function (request, response) { return __awaiter(_this, void 
                         geohash: place_geohash,
                         latitude: _.round(parameters.lat, 4),
                         longitude: _.round(parameters.lng, 4),
-                        name: place_1
+                        name: place
                     })
                         .then(function (id) {
                         console.log("inserted geohash into db \n id: " + id);
                         // storing into redis with (place, id) pairs
-                        client.hset("geohashes", place_1, id.toString());
                     })["catch"](function (err) {
                         throw err;
                     })];
-            case 8:
+            case 5:
                 // storing geohash info into db
                 // camel style table name
                 // australiaLocations
-                _b.sent();
+                _a.sent();
                 obj_1 = { periods: [] };
                 _.forEach(bom_info["data"]["data"], function (value) { return __awaiter(_this, void 0, void 0, function () {
                     return __generator(this, function (_a) {
@@ -150,12 +135,12 @@ app.get("/weather", function (request, response) { return __awaiter(_this, void 
                 }); });
                 response.send(JSON.stringify(obj_1, null, 2));
                 return [2 /*return*/];
-            case 9:
+            case 6:
                 fields = location_1 + "?from=" + parameters.date + "&limit=14&";
-                url = config.get("aeris/forecasts") + fields + config.get("AerisClient.login");
+                url = config.get("url.aeris/forecasts") + fields + config.get("AerisClient.login");
                 return [4 /*yield*/, got(url)];
-            case 10:
-                result = _b.sent();
+            case 7:
+                result = _a.sent();
                 periods = JSON.parse(result.body)["response"][0]["periods"];
                 _.forEach(periods, function (value, key) { return __awaiter(_this, void 0, void 0, function () {
                     var weatherData;
@@ -190,13 +175,13 @@ app.get("/weather", function (request, response) { return __awaiter(_this, void 
                     });
                 }); });
                 response.json(periods);
-                return [3 /*break*/, 12];
-            case 11:
-                err_1 = _b.sent();
+                return [3 /*break*/, 9];
+            case 8:
+                err_1 = _a.sent();
                 console.error(err_1);
                 response.status(404).send("error");
-                return [3 /*break*/, 12];
-            case 12: return [2 /*return*/];
+                return [3 /*break*/, 9];
+            case 9: return [2 /*return*/];
         }
     });
 }); });

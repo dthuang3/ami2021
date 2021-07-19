@@ -19,6 +19,7 @@ const knex = require("knex")({
     database: config.get("dbConfig.database"),
   },
 });
+var geohash_ = require("ngeohash");
 
 const redis = require("redis");
 const redis_port = 6379;
@@ -38,13 +39,11 @@ app.use(
 app.get("/weather", async (request, response) => {
   try {
     // protect input parameters w/ validation check at beginning
-    // i.e. invalid date format, invalid latitude/longitude
+    // e.g. invalid date format, invalid latitude/longitude
     // adding validation - prevent crashing
     if (
       !utils.isValidDate(request.query.date) ||
-      (!utils.isValidLat(request.query.lat) &&
-        !utils.isValidLng(request.query.lng) &&
-        !request.query.WeatherStationID)
+      (!utils.isValidLat(request.query.lat) && !utils.isValidLng(request.query.lng) && !request.query.WeatherStationID)
     ) {
       throw new Error("invalid parameters");
     }
@@ -66,19 +65,12 @@ app.get("/weather", async (request, response) => {
       _.round(parameters.lng, 4)
     );
 
-    // checking if in cache/db
-    const geohash_id = Number(await getAsync("geohashes", place));
-    if (place && geohash_id) {
-      await knex("australia locations")
-        .select("geohash")
-        .where("id", "=", Number(geohash_id))
-        .then((gh) => {
-          response.send(gh);
-        });
-      return;
-    } else if (place) {
+    if (place) {
+      // global placement
       const place_geohash = await services.findGeohash(place);
-      const bom_api = config.get("au/forecast") + place_geohash + "forecasts/daily";
+      console.log(geohash_.encode(_.round(parameters.lat, 4), _.round(parameters.lng, 4), 7));
+      console.log(place_geohash);
+      const bom_api = config.get("url.au/forecasts") + place_geohash + "/forecasts/daily";
       const bom_info = await axios.get(bom_api);
       // storing geohash info into db
       // camel style table name
@@ -94,7 +86,6 @@ app.get("/weather", async (request, response) => {
         .then((id) => {
           console.log("inserted geohash into db \n id: " + id);
           // storing into redis with (place, id) pairs
-          client.hset("geohashes", place, id.toString());
         })
         .catch((err) => {
           throw err;
@@ -115,7 +106,7 @@ app.get("/weather", async (request, response) => {
     // call aeris api
     // TODO: switch from got to axios
     const fields = `${location}?from=${parameters.date}&limit=14&`;
-    const url = config.get("aeris/forecasts") + fields + config.get("AerisClient.login");
+    const url = config.get("url.aeris/forecasts") + fields + config.get("AerisClient.login");
     const result = await got(url);
 
     // parse aerisweather api response for pop, min, max, avg

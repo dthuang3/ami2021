@@ -95,7 +95,7 @@ var findGeohash = function (place) { return __awaiter(_this, void 0, void 0, fun
     return __generator(this, function (_a) {
         switch (_a.label) {
             case 0:
-                url = config.get("au.geohash") + place;
+                url = config.get("url.au/geohash") + place;
                 return [4 /*yield*/, axios.get(url)];
             case 1:
                 response = _a.sent();

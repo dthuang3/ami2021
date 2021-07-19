@@ -14,11 +14,12 @@
     "got": "^11.8.2",
     "knex": "^0.95.6",
     "lru-cache": "^6.0.0",
+    "ngeohash": "^0.6.3",
     "nodemon": "^2.0.12",
     "pg": "^8.6.0",
     "prettier": "^2.3.2",
     "redis": "^3.1.2",
-    "redis-cli": "^2.1.0"
+    "redis-cli": "^1.4.0"
   },
   "devDependencies": {
     "@typescript-eslint/parser": "^4.28.2",

@@ -47,7 +47,7 @@ const BroadenStationSearch = async (
 };
 
 const findGeohash = async (place) => {
-  const url = config.get("au.geohash") + place;
+  const url = config.get("url.au/geohash") + place;
   const response = await axios.get(url);
   return response["data"]["data"][0].geohash;
 };
