@@ -69,7 +69,7 @@ app.use(express.urlencoded({
 // GET localhost:3000/weather?date="xxxxxxxx"&WeatherStationID="xxxxx"
 // TODO: validate api responses before continuing
 app.get("/weather", function (request, response) { return __awaiter(void 0, void 0, void 0, function () {
-    var latLngOnly, weaStationOnly, lat, lng, location_1, date, url, aeris_response, url2, station_response, station_id_1, country, latlon, bomForecast_1, geohash, url3, bom_response, aerisForecast_1, err_1;
+    var latLngOnly, weaStationOnly, lat, lng, location_1, date, url, aeris_response, url2, station_response, station_id_1, country, latlon, bomForecast_1, geohash, url3, test, bom_response, aerisForecast_1, i, err_1;
     return __generator(this, function (_a) {
         switch (_a.label) {
             case 0:
@@ -125,10 +125,13 @@ app.get("/weather", function (request, response) { return __awaiter(void 0, void
                 geohash = geohash_.encode(lat, lng, 7);
                 console.log(geohash);
                 url3 = config.get("url.au/forecasts") + (geohash + "/forecasts/daily");
-                return [4 /*yield*/, axios.get(url3)];
+                test = "https://api.weather.bom.gov.au/v1/locations/r3gx2ux/forecasts/daily";
+                return [4 /*yield*/, axios.get(test)];
             case 3:
                 bom_response = _a.sent();
+                console.log(bom_response["data"]);
                 _.forEach(bom_response["data"]["data"], function (period) {
+                    console.log(period);
                     var forecast = {
                         weaStationID: station_id_1,
                         minTemp: period.temp_min,
@@ -155,6 +158,10 @@ app.get("/weather", function (request, response) { return __awaiter(void 0, void
                     };
                     aerisForecast_1.push(forecast);
                 });
+                // inserting avgTemp with aeris data
+                for (i = 0; i < 7; i++) {
+                    bomForecast_1[i].avgTemp = aerisForecast_1[i].avgTemp;
+                }
                 response.send(bomForecast_1.length >= 1
                     ? JSON.stringify(bomForecast_1, null, "\t")
                     : JSON.stringify(aerisForecast_1, null, "\t"));
@@ -162,7 +169,7 @@ app.get("/weather", function (request, response) { return __awaiter(void 0, void
             case 5:
                 err_1 = _a.sent();
                 console.error(err_1);
-                response.status(404).send("broken");
+                response.status(404).send("something went wrong");
                 return [3 /*break*/, 6];
             case 6: return [2 /*return*/];
         }

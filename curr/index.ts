@@ -111,8 +111,11 @@ app.get("/weather", async (request, response) => {
       console.log(geohash);
       const url3: string =
         config.get("url.au/forecasts") + `${geohash}/forecasts/daily`;
-      const bom_response = await axios.get(url3);
+      const test = "https://api.weather.bom.gov.au/v1/locations/r3gx2ux/forecasts/daily";
+      const bom_response = await axios.get(test);
+      console.log(bom_response["data"]);
       _.forEach(bom_response["data"]["data"], (period) => {
+        console.log(period);
         const forecast: weatherForecast = {
           weaStationID: station_id,
           minTemp: period.temp_min,
@@ -142,6 +145,11 @@ app.get("/weather", async (request, response) => {
       aerisForecast.push(forecast);
     });
 
+    // inserting avgTemp with aeris data
+    for (let i: number = 0; i < 7; i++) {
+      bomForecast[i].avgTemp = aerisForecast[i].avgTemp;
+    }
+
     response.send(
       bomForecast.length >= 1
         ? JSON.stringify(bomForecast, null, "\t")
@@ -149,7 +157,7 @@ app.get("/weather", async (request, response) => {
     );
   } catch (err) {
     console.error(err);
-    response.status(404).send("broken");
+    response.status(404).send("something went wrong");
   }
 });
 
