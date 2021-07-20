@@ -1,9 +1,9 @@
+import { weatherForecast } from "./services/weatherForecast";
 const { AerisWeather } = require("@aerisweather/javascript-sdk");
 const { promisify } = require("util");
 const express = require("express");
 const port = 3000;
 const app = express();
-const bodyParser = require("body-parser");
 var axios = require("axios");
 const got = require("got");
 var config = require("config");
@@ -36,107 +36,120 @@ app.use(
 
 // GET localhost:3000/weather?date="XXXXXXXX"&lat=xxx.xxx&lng=xxx.xxx?
 // GET localhost:3000/weather?date="xxxxxxxx"&WeatherStationID="xxxxx"
+// TODO: validate api responses before continuing
 app.get("/weather", async (request, response) => {
   try {
     // protect input parameters w/ validation check at beginning
     // e.g. invalid date format, invalid latitude/longitude
     // adding validation - prevent crashing
+    // TTF or FFT
+    const latLngOnly: boolean =
+      utils.isValidLat(request.query.lat) &&
+      utils.isValidLng(request.query.lng) &&
+      !request.query.WeatherStationID;
+    const weaStationOnly: boolean =
+      !utils.isValidLat(request.query.lat) &&
+      !utils.isValidLng(request.query.lng) &&
+      request.query.WeatherStationID;
     if (
       !utils.isValidDate(request.query.date) ||
-      (!utils.isValidLat(request.query.lat) && !utils.isValidLng(request.query.lng) && !request.query.WeatherStationID)
+      !(latLngOnly || weaStationOnly)
     ) {
+      // how to default?
       throw new Error("invalid parameters");
     }
 
-    // parse query body for parameters
-    const parameters = await utils.parseQuery(request.query);
-    console.log(parameters);
-    let location;
-    if (request.query.WeatherStationID) {
+    // getting location and lat/lng
+    let lat: number;
+    let lng: number;
+    let location: string;
+    if (latLngOnly) {
+      lat = _.round(request.query.lat, 4);
+      lng = _.round(request.query.lng, 4);
+      location = lat + "," + lng;
+    } else if (weaStationOnly) {
       location = request.query.WeatherStationID;
-    } else {
-      location = parameters.lat + "," + parameters.lng;
+    }
+    let date: string =
+      request.query.date.substring(0, 4) +
+      "/" +
+      request.query.date.substring(4, 6) +
+      "/" +
+      request.query.date.substring(6);
+
+    // getting aerisweather forecasts
+    const url: string =
+      config.get("url.aeris/forecasts") +
+      `${location}?date=${date}&` +
+      config.get("AerisClient.login");
+    // typing AxiosResponse<object>
+    const aeris_response = await axios.get(url);
+
+    // getting aerisweather weatherstation
+    const url2: string =
+      config.get("url.aeris/observations/summary") +
+      `?p=${location}&limit=20&` +
+      config.get("AerisClient.login");
+    const station_response = await axios.get(url2);
+    const station_id: string = station_response["data"]["response"][0]["id"];
+    const country: string =
+      station_response["data"]["response"][0]["place"]["country"];
+    const latlon = station_response["data"]["response"][0]["loc"];
+    console.log(latlon);
+    if (weaStationOnly) {
+      lat = latlon.lat;
+      lng = latlon.long;
     }
 
-    // checking if location is in australia
-    // takes in a lat/lng, finds location name with aerisweather api
-    const place = await services.placeInAustralia(
-      _.round(parameters.lat, 4),
-      _.round(parameters.lng, 4)
-    );
+    // TODO: insert aerisweather information into db
 
-    if (place) {
-      // global placement
-      const place_geohash = await services.findGeohash(place);
-      console.log(geohash_.encode(_.round(parameters.lat, 4), _.round(parameters.lng, 4), 7));
-      console.log(place_geohash);
-      const bom_api = config.get("url.au/forecasts") + place_geohash + "/forecasts/daily";
-      const bom_info = await axios.get(bom_api);
-      // storing geohash info into db
-      // camel style table name
-      // australiaLocations
-      await knex("australia locations")
-        .returning("id")
-        .insert({
-          geohash: place_geohash,
-          latitude: _.round(parameters.lat, 4),
-          longitude: _.round(parameters.lng, 4),
-          name: place,
-        })
-        .then((id) => {
-          console.log("inserted geohash into db \n id: " + id);
-          // storing into redis with (place, id) pairs
-        })
-        .catch((err) => {
-          throw err;
-        });
+    let bomForecast: weatherForecast[] = [];
 
-      let obj = { periods: [] };
-      _.forEach(bom_info["data"]["data"], async (value) => {
-        obj.periods.push(
-          `date: ${value.date.substring(0, 10)}, pop: ${
-            value.rain.chance
-          }, maxTempF: ${value.temp_max}, minTempF: ${value.temp_min}`
-        );
+    if (country === "au") {
+      // call bom using geohash
+      const geohash: string = geohash_.encode(lat, lng, 7);
+      console.log(geohash);
+      const url3: string =
+        config.get("url.au/forecasts") + `${geohash}/forecasts/daily`;
+      const bom_response = await axios.get(url3);
+      _.forEach(bom_response["data"]["data"], (period) => {
+        const forecast: weatherForecast = {
+          weaStationID: station_id,
+          minTemp: period.temp_min,
+          maxTemp: period.temp_max,
+          avgTemp: 0,
+          pop: period.rain.chance,
+          date: period.date,
+          source: "BoM",
+        };
+        bomForecast.push(forecast);
       });
-      response.send(JSON.stringify(obj, null, 2));
-      return;
+
+      // TODO: insert bom info into db
     }
 
-    // call aeris api
-    // TODO: switch from got to axios
-    const fields = `${location}?from=${parameters.date}&limit=14&`;
-    const url = config.get("url.aeris/forecasts") + fields + config.get("AerisClient.login");
-    const result = await got(url);
-
-    // parse aerisweather api response for pop, min, max, avg
-    // show all days
-    const periods: Object[] = JSON.parse(result.body)["response"][0]["periods"];
-    _.forEach(periods, async (value, key) => {
-      const weatherData = {
-        date: value.validTime.substring(0, 10),
-        latitude: _.round(request.query.lat, 4),
-        longitude: _.round(request.query.lng, 4),
-        pop: value.pop,
-        minTempF: value.minTempF,
-        maxTempF: value.maxTempF,
-        avgTempF: value.avgTempF,
-        weatherStationId: request.query.WeatherStationID,
+    let aerisForecast: weatherForecast[] = [];
+    _.forEach(aeris_response["data"]["response"][0]["periods"], (period) => {
+      const forecast: weatherForecast = {
+        weaStationID: station_id,
+        minTemp: period.minTempC,
+        maxTemp: period.maxTempC,
+        avgTemp: period.avgTempC,
+        pop: period.pop,
+        date: period.validTime,
+        source: "AerisWeather",
       };
-      // if other queries are dependent on this knex call, use await
-      // interface of typescript
-      // knex<AAA>("aaa") ** important advantage for typescript
-      await knex("AMI")
-        .insert(weatherData)
-        .then(() => console.log("inserted to db"))
-        .catch((err) => {
-          throw err;
-        });
+      aerisForecast.push(forecast);
     });
-    response.json(periods);
+
+    response.send(
+      bomForecast.length >= 1
+        ? JSON.stringify(bomForecast, null, "\t")
+        : JSON.stringify(aerisForecast, null, "\t")
+    );
   } catch (err) {
     console.error(err);
-    response.status(404).send("error");
+    response.status(404).send("broken");
   }
 });
 

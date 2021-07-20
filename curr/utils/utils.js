@@ -15,7 +15,7 @@ module.exports = {
             return false;
         var today = new Date();
         var num_date = parseInt(date);
-        console.log(today.getFullYear() * 10000 + today.getMonth() * 100 + today.getDate());
+        console.log(today.getFullYear() * 10000 + (today.getMonth() + 1) * 100 + today.getDate());
         console.log(num_date);
         return (num_date >=
             today.getFullYear() * 10000 + today.getMonth() * 100 + today.getDate());

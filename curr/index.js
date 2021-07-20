@@ -1,3 +1,4 @@
+"use strict";
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -34,13 +35,12 @@ var __generator = (this && this.__generator) || function (thisArg, body) {
         if (op[0] & 5) throw op[1]; return { value: op[0] ? op[1] : void 0, done: true };
     }
 };
-var _this = this;
+exports.__esModule = true;
 var AerisWeather = require("@aerisweather/javascript-sdk").AerisWeather;
 var promisify = require("util").promisify;
 var express = require("express");
 var port = 3000;
 var app = express();
-var bodyParser = require("body-parser");
 var axios = require("axios");
 var got = require("got");
 var config = require("config");
@@ -67,127 +67,110 @@ app.use(express.urlencoded({
 }));
 // GET localhost:3000/weather?date="XXXXXXXX"&lat=xxx.xxx&lng=xxx.xxx?
 // GET localhost:3000/weather?date="xxxxxxxx"&WeatherStationID="xxxxx"
-app.get("/weather", function (request, response) { return __awaiter(_this, void 0, void 0, function () {
-    var parameters, location_1, place, place_geohash, bom_api, bom_info, obj_1, fields, url, result, periods, err_1;
-    var _this = this;
+// TODO: validate api responses before continuing
+app.get("/weather", function (request, response) { return __awaiter(void 0, void 0, void 0, function () {
+    var latLngOnly, weaStationOnly, lat, lng, location_1, date, url, aeris_response, url2, station_response, station_id_1, country, latlon, bomForecast_1, geohash, url3, bom_response, aerisForecast_1, err_1;
     return __generator(this, function (_a) {
         switch (_a.label) {
             case 0:
-                _a.trys.push([0, 8, , 9]);
-                // protect input parameters w/ validation check at beginning
-                // e.g. invalid date format, invalid latitude/longitude
-                // adding validation - prevent crashing
+                _a.trys.push([0, 5, , 6]);
+                latLngOnly = utils.isValidLat(request.query.lat) &&
+                    utils.isValidLng(request.query.lng) &&
+                    !request.query.WeatherStationID;
+                weaStationOnly = !utils.isValidLat(request.query.lat) &&
+                    !utils.isValidLng(request.query.lng) &&
+                    request.query.WeatherStationID;
                 if (!utils.isValidDate(request.query.date) ||
-                    (!utils.isValidLat(request.query.lat) && !utils.isValidLng(request.query.lng) && !request.query.WeatherStationID)) {
+                    !(latLngOnly || weaStationOnly)) {
+                    // how to default?
                     throw new Error("invalid parameters");
                 }
-                return [4 /*yield*/, utils.parseQuery(request.query)];
-            case 1:
-                parameters = _a.sent();
-                console.log(parameters);
-                if (request.query.WeatherStationID) {
+                lat = void 0;
+                lng = void 0;
+                if (latLngOnly) {
+                    lat = _.round(request.query.lat, 4);
+                    lng = _.round(request.query.lng, 4);
+                    location_1 = lat + "," + lng;
+                }
+                else if (weaStationOnly) {
                     location_1 = request.query.WeatherStationID;
                 }
-                else {
-                    location_1 = parameters.lat + "," + parameters.lng;
-                }
-                return [4 /*yield*/, services.placeInAustralia(_.round(parameters.lat, 4), _.round(parameters.lng, 4))];
+                date = request.query.date.substring(0, 4) +
+                    "/" +
+                    request.query.date.substring(4, 6) +
+                    "/" +
+                    request.query.date.substring(6);
+                url = config.get("url.aeris/forecasts") +
+                    (location_1 + "?date=" + date + "&") +
+                    config.get("AerisClient.login");
+                return [4 /*yield*/, axios.get(url)];
+            case 1:
+                aeris_response = _a.sent();
+                url2 = config.get("url.aeris/observations/summary") +
+                    ("?p=" + location_1 + "&limit=20&") +
+                    config.get("AerisClient.login");
+                return [4 /*yield*/, axios.get(url2)];
             case 2:
-                place = _a.sent();
-                if (!place) return [3 /*break*/, 6];
-                return [4 /*yield*/, services.findGeohash(place)];
+                station_response = _a.sent();
+                station_id_1 = station_response["data"]["response"][0]["id"];
+                country = station_response["data"]["response"][0]["place"]["country"];
+                latlon = station_response["data"]["response"][0]["loc"];
+                console.log(latlon);
+                if (weaStationOnly) {
+                    lat = latlon.lat;
+                    lng = latlon.long;
+                }
+                bomForecast_1 = [];
+                if (!(country === "au")) return [3 /*break*/, 4];
+                geohash = geohash_.encode(lat, lng, 7);
+                console.log(geohash);
+                url3 = config.get("url.au/forecasts") + (geohash + "/forecasts/daily");
+                return [4 /*yield*/, axios.get(url3)];
             case 3:
-                place_geohash = _a.sent();
-                console.log(geohash_.encode(_.round(parameters.lat, 4), _.round(parameters.lng, 4), 7));
-                console.log(place_geohash);
-                bom_api = config.get("url.au/forecasts") + place_geohash + "/forecasts/daily";
-                return [4 /*yield*/, axios.get(bom_api)];
+                bom_response = _a.sent();
+                _.forEach(bom_response["data"]["data"], function (period) {
+                    var forecast = {
+                        weaStationID: station_id_1,
+                        minTemp: period.temp_min,
+                        maxTemp: period.temp_max,
+                        avgTemp: 0,
+                        pop: period.rain.chance,
+                        date: period.date,
+                        source: "BoM"
+                    };
+                    bomForecast_1.push(forecast);
+                });
+                _a.label = 4;
             case 4:
-                bom_info = _a.sent();
-                // storing geohash info into db
-                // camel style table name
-                // australiaLocations
-                return [4 /*yield*/, knex("australia locations")
-                        .returning("id")
-                        .insert({
-                        geohash: place_geohash,
-                        latitude: _.round(parameters.lat, 4),
-                        longitude: _.round(parameters.lng, 4),
-                        name: place
-                    })
-                        .then(function (id) {
-                        console.log("inserted geohash into db \n id: " + id);
-                        // storing into redis with (place, id) pairs
-                    })["catch"](function (err) {
-                        throw err;
-                    })];
+                aerisForecast_1 = [];
+                _.forEach(aeris_response["data"]["response"][0]["periods"], function (period) {
+                    var forecast = {
+                        weaStationID: station_id_1,
+                        minTemp: period.minTempC,
+                        maxTemp: period.maxTempC,
+                        avgTemp: period.avgTempC,
+                        pop: period.pop,
+                        date: period.validTime,
+                        source: "AerisWeather"
+                    };
+                    aerisForecast_1.push(forecast);
+                });
+                response.send(bomForecast_1.length >= 1
+                    ? JSON.stringify(bomForecast_1, null, "\t")
+                    : JSON.stringify(aerisForecast_1, null, "\t"));
+                return [3 /*break*/, 6];
             case 5:
-                // storing geohash info into db
-                // camel style table name
-                // australiaLocations
-                _a.sent();
-                obj_1 = { periods: [] };
-                _.forEach(bom_info["data"]["data"], function (value) { return __awaiter(_this, void 0, void 0, function () {
-                    return __generator(this, function (_a) {
-                        obj_1.periods.push("date: " + value.date.substring(0, 10) + ", pop: " + value.rain.chance + ", maxTempF: " + value.temp_max + ", minTempF: " + value.temp_min);
-                        return [2 /*return*/];
-                    });
-                }); });
-                response.send(JSON.stringify(obj_1, null, 2));
-                return [2 /*return*/];
-            case 6:
-                fields = location_1 + "?from=" + parameters.date + "&limit=14&";
-                url = config.get("url.aeris/forecasts") + fields + config.get("AerisClient.login");
-                return [4 /*yield*/, got(url)];
-            case 7:
-                result = _a.sent();
-                periods = JSON.parse(result.body)["response"][0]["periods"];
-                _.forEach(periods, function (value, key) { return __awaiter(_this, void 0, void 0, function () {
-                    var weatherData;
-                    return __generator(this, function (_a) {
-                        switch (_a.label) {
-                            case 0:
-                                weatherData = {
-                                    date: value.validTime.substring(0, 10),
-                                    latitude: _.round(request.query.lat, 4),
-                                    longitude: _.round(request.query.lng, 4),
-                                    pop: value.pop,
-                                    minTempF: value.minTempF,
-                                    maxTempF: value.maxTempF,
-                                    avgTempF: value.avgTempF,
-                                    weatherStationId: request.query.WeatherStationID
-                                };
-                                // if other queries are dependent on this knex call, use await
-                                // interface of typescript
-                                // knex<AAA>("aaa") ** important advantage for typescript
-                                return [4 /*yield*/, knex("AMI")
-                                        .insert(weatherData)
-                                        .then(function () { return console.log("inserted to db"); })["catch"](function (err) {
-                                        throw err;
-                                    })];
-                            case 1:
-                                // if other queries are dependent on this knex call, use await
-                                // interface of typescript
-                                // knex<AAA>("aaa") ** important advantage for typescript
-                                _a.sent();
-                                return [2 /*return*/];
-                        }
-                    });
-                }); });
-                response.json(periods);
-                return [3 /*break*/, 9];
-            case 8:
                 err_1 = _a.sent();
                 console.error(err_1);
-                response.status(404).send("error");
-                return [3 /*break*/, 9];
-            case 9: return [2 /*return*/];
+                response.status(404).send("broken");
+                return [3 /*break*/, 6];
+            case 6: return [2 /*return*/];
         }
     });
 }); });
 // GET localhost:3000/getNearByWeatherStation?lat=xxxx.xxx&&lng=xx.xxx
 // combining australia weather stations and aerisweather weather stations
-app.get("/getNearByWeatherStation", function (request, response) { return __awaiter(_this, void 0, void 0, function () {
+app.get("/getNearByWeatherStation", function (request, response) { return __awaiter(void 0, void 0, void 0, function () {
     var foo, station_info, err_2;
     return __generator(this, function (_a) {
         switch (_a.label) {
