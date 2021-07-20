@@ -1,15 +1,13 @@
 import { weatherForecast } from "./services/weatherForecast";
-const { AerisWeather } = require("@aerisweather/javascript-sdk");
-const { promisify } = require("util");
-const express = require("express");
+import { promisify } from "util";
+import * as express from "express"
 const port = 3000;
 const app = express();
-var axios = require("axios");
-const got = require("got");
-var config = require("config");
-var _ = require("lodash");
-const utils = require("./utils/utils.ts");
-const services = require("./services/services.ts");
+import axios from "axios";
+import * as config from "config";
+import * as _ from "lodash"
+import { isValidDate, isValidLat, isValidLng } from "./utils/utils";
+import { BroadenStationSearch } from "./services/services"
 const knex = require("knex")({
   client: "pg",
   connection: {
@@ -19,7 +17,7 @@ const knex = require("knex")({
     database: config.get("dbConfig.database"),
   },
 });
-var geohash_ = require("ngeohash");
+import * as geohash_ from "ngeohash";
 
 const redis = require("redis");
 const redis_port = 6379;
@@ -44,15 +42,15 @@ app.get("/weather", async (request, response) => {
     // adding validation - prevent crashing
     // TTF or FFT
     const latLngOnly: boolean =
-      utils.isValidLat(request.query.lat) &&
-      utils.isValidLng(request.query.lng) &&
+      isValidLat(request.query.lat) &&
+      isValidLng(request.query.lng) &&
       !request.query.WeatherStationID;
     const weaStationOnly: boolean =
-      !utils.isValidLat(request.query.lat) &&
-      !utils.isValidLng(request.query.lng) &&
-      request.query.WeatherStationID;
+      !isValidLat(request.query.lat) &&
+      !isValidLng(request.query.lng) &&
+      !!request.query.WeatherStationID;
     if (
-      !utils.isValidDate(request.query.date) ||
+      !isValidDate(request.query.date) ||
       !(latLngOnly || weaStationOnly)
     ) {
       // how to default?
@@ -68,14 +66,14 @@ app.get("/weather", async (request, response) => {
       lng = _.round(request.query.lng, 4);
       location = lat + "," + lng;
     } else if (weaStationOnly) {
-      location = request.query.WeatherStationID;
+      location = request.query.WeatherStationID.toString();
     }
-    let date: string =
-      request.query.date.substring(0, 4) +
+    const date: string =
+      request.query.date.toString().substring(0, 4) +
       "/" +
-      request.query.date.substring(4, 6) +
+      request.query.date.toString().substring(4, 6) +
       "/" +
-      request.query.date.substring(6);
+      request.query.date.toString().substring(6);
 
     // getting aerisweather forecasts
     const url: string =
@@ -94,44 +92,15 @@ app.get("/weather", async (request, response) => {
     const station_id: string = station_response["data"]["response"][0]["id"];
     const country: string =
       station_response["data"]["response"][0]["place"]["country"];
+    console.log(country);
     const latlon = station_response["data"]["response"][0]["loc"];
     console.log(latlon);
     if (weaStationOnly) {
-      lat = latlon.lat;
-      lng = latlon.long;
+      lat = _.round(latlon.lat, 4);
+      lng = _.round(latlon.long, 4);
     }
 
-    // TODO: insert aerisweather information into db
-
-    let bomForecast: weatherForecast[] = [];
-
-    if (country === "au") {
-      // call bom using geohash
-      const geohash: string = geohash_.encode(lat, lng, 7);
-      console.log(geohash);
-      const url3: string =
-        config.get("url.au/forecasts") + `${geohash}/forecasts/daily`;
-      const test = "https://api.weather.bom.gov.au/v1/locations/r3gx2ux/forecasts/daily";
-      const bom_response = await axios.get(test);
-      console.log(bom_response["data"]);
-      _.forEach(bom_response["data"]["data"], (period) => {
-        console.log(period);
-        const forecast: weatherForecast = {
-          weaStationID: station_id,
-          minTemp: period.temp_min,
-          maxTemp: period.temp_max,
-          avgTemp: 0,
-          pop: period.rain.chance,
-          date: period.date,
-          source: "BoM",
-        };
-        bomForecast.push(forecast);
-      });
-
-      // TODO: insert bom info into db
-    }
-
-    let aerisForecast: weatherForecast[] = [];
+    const aerisForecast: weatherForecast[] = [];
     _.forEach(aeris_response["data"]["response"][0]["periods"], (period) => {
       const forecast: weatherForecast = {
         weaStationID: station_id,
@@ -145,15 +114,43 @@ app.get("/weather", async (request, response) => {
       aerisForecast.push(forecast);
     });
 
-    // inserting avgTemp with aeris data
-    for (let i: number = 0; i < 7; i++) {
-      bomForecast[i].avgTemp = aerisForecast[i].avgTemp;
+    // TODO: insert aerisweather information into db
+
+    const bomForecast: weatherForecast[] = [];
+
+    if (country === "au") {
+      // call bom using geohash
+      const geohash: string = geohash_.encode(lat, lng, 7);
+      console.log(geohash);
+      const url3: string =
+        config.get("url.au/forecasts") + `${geohash}/forecasts/daily`;
+      const bom_response = await axios.get(url3);
+      console.log(bom_response["data"]);
+      _.forEach(bom_response["data"]["data"], (period) => {
+        const forecast: weatherForecast = {
+          weaStationID: station_id,
+          minTemp: period.temp_min,
+          maxTemp: period.temp_max,
+          avgTemp: period.temp_min + period.temp_max / 2,
+          pop: period.rain.chance,
+          date: period.date,
+          source: "BoM",
+        };
+        bomForecast.push(forecast);
+      });
+
+      // inserting avgTemp with aeris data
+      for (let i = 0; i < 7; i++) {
+        bomForecast[i].avgTemp = aerisForecast[i].avgTemp;
+      }
+
+      // TODO: insert bom info into db
     }
 
     response.send(
       bomForecast.length >= 1
-        ? JSON.stringify(bomForecast, null, "\t")
-        : JSON.stringify(aerisForecast, null, "\t")
+        ? JSON.stringify({ forecast: bomForecast }, null, "\t")
+        : JSON.stringify({ forecast: aerisForecast }, null, "\t")
     );
   } catch (err) {
     console.error(err);
@@ -167,8 +164,8 @@ app.get("/getNearByWeatherStation", async (request, response) => {
   try {
     // parameter validation
     if (
-      !utils.isValidLat(request.query.lat) ||
-      !utils.isValidLng(request.query.lng)
+      !isValidLat(request.query.lat) ||
+      !isValidLng(request.query.lng)
     ) {
       throw new Error("invalid location");
     }
@@ -186,7 +183,7 @@ app.get("/getNearByWeatherStation", async (request, response) => {
       return;
     } else {
       // search for 20 closest weather stations
-      const station_info = await services.BroadenStationSearch(
+      const station_info = await BroadenStationSearch(
         _.round(request.query.lat, 4),
         _.round(request.query.lng, 4),
         20,

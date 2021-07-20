@@ -1,25 +1,13 @@
-var config = require("config");
-var axios = require("axios");
-var _ = require("lodash");
-const placeInAustralia = async (lat, lng) => {
-  // urls in config
-  const params = `${lat},${lng}?`;
-  const url = config.get("url.aeris/places") + params + config.get("AerisClient.login");
-  const response = await axios.get(url);
-  // error handling empty australia response - get aeris backup
-  if (response["data"]["response"]["place"]["countryFull"] === "Australia") {
-    return response["data"]["response"]["place"]["name"];
-  } else {
-    return null;
-  }
-};
+import * as config from "config";
+import axios from "axios";
+import * as _ from "lodash";
 
-const BroadenStationSearch = async (
-  lat,
-  lng,
-  radius,
-  station_info_response
-) => {
+export const BroadenStationSearch = async (
+  lat: number,
+  lng: number,
+  radius: number,
+  station_info_response: any
+): Promise<any[]> => {
   // base case: too many searches
   // base case: station_info_response is not empty
   if (
@@ -44,16 +32,4 @@ const BroadenStationSearch = async (
     };
   });
   return BroadenStationSearch(lat, lng, radius + 10, station_info);
-};
-
-const findGeohash = async (place) => {
-  const url = config.get("url.au/geohash") + place;
-  const response = await axios.get(url);
-  return response["data"]["data"][0].geohash;
-};
-
-module.exports = {
-  placeInAustralia,
-  BroadenStationSearch,
-  findGeohash
 };
