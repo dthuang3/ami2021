@@ -1,14 +1,16 @@
 import { weatherForecast } from "./services/weatherForecast";
+import { weatherStation } from "./services/weatherStation";
 import { promisify } from "util";
-import * as express from "express"
+import * as express from "express";
 const port = 3000;
 const app = express();
 import axios from "axios";
 import * as config from "config";
-import * as _ from "lodash"
+import * as _ from "lodash";
 import { isValidDate, isValidLat, isValidLng } from "./utils/utils";
-import { BroadenStationSearch } from "./services/services"
-const knex = require("knex")({
+import { BroadenStationSearch } from "./services/services";
+import knex from "knex";
+const myknex = knex({
   client: "pg",
   connection: {
     host: config.get("dbConfig.host"),
@@ -19,7 +21,7 @@ const knex = require("knex")({
 });
 import * as geohash_ from "ngeohash";
 
-const redis = require("redis");
+import redis from "redis";
 const redis_port = 6379;
 
 const client = redis.createClient(redis_port);
@@ -49,24 +51,8 @@ app.get("/weather", async (request, response) => {
       !isValidLat(request.query.lat) &&
       !isValidLng(request.query.lng) &&
       !!request.query.WeatherStationID;
-    if (
-      !isValidDate(request.query.date) ||
-      !(latLngOnly || weaStationOnly)
-    ) {
-      // how to default?
+    if (!isValidDate(request.query.date) || !(latLngOnly || weaStationOnly)) {
       throw new Error("invalid parameters");
-    }
-
-    // getting location and lat/lng
-    let lat: number;
-    let lng: number;
-    let location: string;
-    if (latLngOnly) {
-      lat = _.round(request.query.lat, 4);
-      lng = _.round(request.query.lng, 4);
-      location = lat + "," + lng;
-    } else if (weaStationOnly) {
-      location = request.query.WeatherStationID.toString();
     }
     const date: string =
       request.query.date.toString().substring(0, 4) +
@@ -75,10 +61,55 @@ app.get("/weather", async (request, response) => {
       "/" +
       request.query.date.toString().substring(6);
 
+    // getting location and lat/lng
+    let lat: number;
+    let lng: number;
+    let location: string;
+    let station: weatherStation;
+    let results: weatherForecast[];
+    if (latLngOnly) {
+      lat = _.round(request.query.lat, 4);
+      lng = _.round(request.query.lng, 4);
+      location = lat + "," + lng;
+    } else if (weaStationOnly) {
+      location = _.upperCase(request.query.WeatherStationID.toString());
+      const stations = await myknex("WeatherStations")
+        .select("*")
+        .where("weaStationID", location);
+      console.log(stations);
+      station = stations[0];
+      await myknex.raw(`SET TIME ZONE "${station.timezone}"`);
+      const a = new Date(
+        parseInt(date.substring(0, 5)),
+        parseInt(date.substring(6, 7)) - 1,
+        parseInt(date.substring(8))
+      );
+      console.log(a);
+      console.log(a.toISOString());
+      results = await myknex("Forecasts")
+        .distinct(
+          "weaStationID",
+          "minTemp",
+          "maxTemp",
+          "avgTemp",
+          "pop",
+          "date",
+          "source"
+        )
+        .where("weaStationID", location)
+        .andWhere("date", ">=", a)
+        .andWhere("source", station.country == "au" ? "BoM" : "AerisWeather")
+        .orderBy([{ column: "source", order: "desc" }, "date"]);
+      if (results) {
+        response.send(JSON.stringify({ results }, null, "\t"));
+        return;
+      }
+    }
+
     // getting aerisweather forecasts
     const url: string =
       config.get("url.aeris/forecasts") +
-      `${location}?date=${date}&` +
+      `${location}?from=${date}&to=+7days&` +
       config.get("AerisClient.login");
     // typing AxiosResponse<object>
     const aeris_response = await axios.get(url);
@@ -89,49 +120,59 @@ app.get("/weather", async (request, response) => {
       `?p=${location}&limit=20&` +
       config.get("AerisClient.login");
     const station_response = await axios.get(url2);
-    const station_id: string = station_response["data"]["response"][0]["id"];
-    const country: string =
-      station_response["data"]["response"][0]["place"]["country"];
-    console.log(country);
-    const latlon = station_response["data"]["response"][0]["loc"];
-    console.log(latlon);
+
+    // ensures valid response to parse
+    if (station_response["data"]["error"] != null) {
+      throw new Error("Invalid Station");
+    }
+    station = {
+      weaStationID: station_response["data"]["response"][0]["id"],
+      country: station_response["data"]["response"][0]["place"]["country"],
+      latitude: _.round(
+        station_response["data"]["response"][0]["loc"]["lat"],
+        4
+      ),
+      longitude: _.round(
+        station_response["data"]["response"][0]["loc"]["long"],
+        4
+      ),
+      timezone: station_response["data"]["response"][0]["profile"]["tz"],
+    };
+
     if (weaStationOnly) {
-      lat = _.round(latlon.lat, 4);
-      lng = _.round(latlon.long, 4);
+      lat = station.latitude;
+      lng = station.longitude;
     }
 
     const aerisForecast: weatherForecast[] = [];
     _.forEach(aeris_response["data"]["response"][0]["periods"], (period) => {
       const forecast: weatherForecast = {
-        weaStationID: station_id,
+        weaStationID: station.weaStationID,
         minTemp: period.minTempC,
         maxTemp: period.maxTempC,
         avgTemp: period.avgTempC,
         pop: period.pop,
-        date: period.validTime,
+        date: period.dateTimeISO,
         source: "AerisWeather",
       };
       aerisForecast.push(forecast);
     });
 
-    // TODO: insert aerisweather information into db
-
     const bomForecast: weatherForecast[] = [];
 
-    if (country === "au") {
+    if (station.country === "au") {
       // call bom using geohash
       const geohash: string = geohash_.encode(lat, lng, 7);
       console.log(geohash);
       const url3: string =
         config.get("url.au/forecasts") + `${geohash}/forecasts/daily`;
       const bom_response = await axios.get(url3);
-      console.log(bom_response["data"]);
       _.forEach(bom_response["data"]["data"], (period) => {
         const forecast: weatherForecast = {
-          weaStationID: station_id,
+          weaStationID: station.weaStationID,
           minTemp: period.temp_min,
           maxTemp: period.temp_max,
-          avgTemp: period.temp_min + period.temp_max / 2,
+          avgTemp: (period.temp_min + period.temp_max) / 2,
           pop: period.rain.chance,
           date: period.date,
           source: "BoM",
@@ -143,9 +184,23 @@ app.get("/weather", async (request, response) => {
       for (let i = 0; i < 7; i++) {
         bomForecast[i].avgTemp = aerisForecast[i].avgTemp;
       }
-
-      // TODO: insert bom info into db
     }
+
+    // insert weatherstation into db
+    await myknex("WeatherStations")
+      .insert(station)
+      .onConflict("weaStationID")
+      .ignore();
+
+    // combine all weatherforecasts
+    const allForecasts: weatherForecast[] = _.concat(
+      aerisForecast,
+      bomForecast
+    );
+    // insert to db
+    _.forEach(allForecasts, async (forecast: weatherForecast) => {
+      await myknex("Forecasts").insert(forecast);
+    });
 
     response.send(
       bomForecast.length >= 1
@@ -163,10 +218,7 @@ app.get("/weather", async (request, response) => {
 app.get("/getNearByWeatherStation", async (request, response) => {
   try {
     // parameter validation
-    if (
-      !isValidLat(request.query.lat) ||
-      !isValidLng(request.query.lng)
-    ) {
+    if (!isValidLat(request.query.lat) || !isValidLng(request.query.lng)) {
       throw new Error("invalid location");
     }
 
