@@ -2,3 +2,5 @@
 /curr/node_modules
 /pre/node_modules
 /info
+/curr/compiledJS
+/curr/\.eslint*
