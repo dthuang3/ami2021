@@ -105,7 +105,7 @@ app.get("/weather", async (request, response) => {
         );
         //console.log(results["rows"]);
         //console.log(results);
-        if (results.length == 7) {
+        if (results["rowCount"] == 7) {
           console.log("from db");
           response.send({ forecast: results });
           return;
@@ -119,7 +119,11 @@ app.get("/weather", async (request, response) => {
       `${location}?from=${date}&to=+7days&` +
       config.get("AerisClient.login");
     // typing AxiosResponse<object>
-    const aeris_response = await axios.get(url);
+    const aeris_response = await axios
+      .get(url, { timeout: 300 })
+      .catch((err) => {
+        throw new HttpError(502, "Bad Gateway: timeout");
+      });
     // checking aeris response
     if (aeris_response["data"]["error"] != null) {
       throw new HttpError(502, "Bad Gateway: no forecast");
@@ -131,7 +135,11 @@ app.get("/weather", async (request, response) => {
       config.get("url.aeris/observations/summary") +
       `?p=${location}&limit=20&` +
       config.get("AerisClient.login");
-    const station_response = await axios.get(url2);
+    const station_response = await axios
+      .get(url2, { timeout: 300 })
+      .catch((err) => {
+        throw new HttpError(502, "Bad Gateway: timeout");
+      });
 
     // ensures valid response to parse
     if (station_response["data"]["error"] != null) {
@@ -182,7 +190,11 @@ app.get("/weather", async (request, response) => {
       // console.log(geohash);
       const url3: string =
         config.get("url.au/forecasts") + `${geohash}/forecasts/daily`;
-      const bom_response = await axios.get(url3);
+      const bom_response = await axios
+        .get(url3, { timeout: 300 })
+        .catch((err) => {
+          throw new HttpError(502, "Bad Gateway: timeout");
+        });
       _.forEach(bom_response["data"]["data"], (period) => {
         const forecast: weatherForecast = {
           weaStationID: station.weaStationID,
