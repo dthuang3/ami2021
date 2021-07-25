@@ -276,7 +276,7 @@
 				"method": "GET",
 				"header": [],
 				"url": {
-					"raw": "http://localhost:3000/weather?WeatherStationID=pws_rosegarden&date=20210722",
+					"raw": "http://localhost:3000/weather?WeatherStationID=pws_rosegarden&date=20210725",
 					"protocol": "http",
 					"host": [
 						"localhost"
@@ -302,7 +302,7 @@
 						},
 						{
 							"key": "date",
-							"value": "20210722"
+							"value": "20210725"
 						}
 					]
 				}
@@ -423,6 +423,81 @@
 			"response": []
 		},
 		{
+			"name": "[success] location outside australia",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test(\"Status code is 200\", () => {",
+							"    pm.response.to.have.status(200);",
+							"});",
+							"",
+							"const res = pm.response.json()",
+							"pm.test(\"Correct data types\", () => {",
+							"    for (forecast in res.forecasts) {",
+							"        pm.expect(res).to.be.an(\"object\");",
+							"        pm.expect(res.weaStationID).to.be.a(\"string\");",
+							"        pm.expect(res.maxTemp).to.be.a(\"number\");",
+							"        pm.expect(res.avgTemp).to.be.a(\"number\");        ",
+							"        pm.expect(res.pop).to.be.a(\"number\");        ",
+							"        pm.expect(res.date).to.be.a(\"string\");",
+							"        pm.expect(res.source).to.be.a(\"string\");",
+							"    }",
+							"});",
+							"",
+							"pm.test(\"Source is AerisWeather\", () => {",
+							"    for (forecast in res.forecasts) {",
+							"        pm.expect(forecast.source).to.eql(\"AerisWeather\")",
+							"    }",
+							"});",
+							"",
+							"pm.collectionVariables.set(\"responseTimeFromAPI\", pm.response.responseTime);",
+							"pm.collectionVariables.set(\"responseFromAPI_json\", pm.response.json());",
+							""
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "http://localhost:3000/weather?date=20210725&WeatherStationID=pws_rosegarden",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"weather"
+					],
+					"query": [
+						{
+							"key": "lat",
+							"value": "36.547181",
+							"disabled": true
+						},
+						{
+							"key": "lng",
+							"value": "-115.413539",
+							"disabled": true
+						},
+						{
+							"key": "date",
+							"value": "20210725"
+						},
+						{
+							"key": "WeatherStationID",
+							"value": "pws_rosegarden"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
 			"name": "[success] [db] location outside australia",
 			"event": [
 				{
@@ -500,81 +575,6 @@
 						{
 							"key": "WeatherStationID",
 							"value": "KC83"
-						}
-					]
-				}
-			},
-			"response": []
-		},
-		{
-			"name": "[success] location outside australia",
-			"event": [
-				{
-					"listen": "test",
-					"script": {
-						"exec": [
-							"pm.test(\"Status code is 200\", () => {",
-							"    pm.response.to.have.status(200);",
-							"});",
-							"",
-							"const res = pm.response.json()",
-							"pm.test(\"Correct data types\", () => {",
-							"    for (forecast in res.forecasts) {",
-							"        pm.expect(res).to.be.an(\"object\");",
-							"        pm.expect(res.weaStationID).to.be.a(\"string\");",
-							"        pm.expect(res.maxTemp).to.be.a(\"number\");",
-							"        pm.expect(res.avgTemp).to.be.a(\"number\");        ",
-							"        pm.expect(res.pop).to.be.a(\"number\");        ",
-							"        pm.expect(res.date).to.be.a(\"string\");",
-							"        pm.expect(res.source).to.be.a(\"string\");",
-							"    }",
-							"});",
-							"",
-							"pm.test(\"Source is AerisWeather\", () => {",
-							"    for (forecast in res.forecasts) {",
-							"        pm.expect(forecast.source).to.eql(\"AerisWeather\")",
-							"    }",
-							"});",
-							"",
-							"pm.collectionVariables.set(\"responseTimeFromAPI\", pm.response.responseTime);",
-							"pm.collectionVariables.set(\"responseFromAPI_json\", pm.response.json());",
-							""
-						],
-						"type": "text/javascript"
-					}
-				}
-			],
-			"request": {
-				"method": "GET",
-				"header": [],
-				"url": {
-					"raw": "http://localhost:3000/weather?date=20210725&WeatherStationID=pws_rosegarden",
-					"protocol": "http",
-					"host": [
-						"localhost"
-					],
-					"port": "3000",
-					"path": [
-						"weather"
-					],
-					"query": [
-						{
-							"key": "lat",
-							"value": "36.547181",
-							"disabled": true
-						},
-						{
-							"key": "lng",
-							"value": "-115.413539",
-							"disabled": true
-						},
-						{
-							"key": "date",
-							"value": "20210725"
-						},
-						{
-							"key": "WeatherStationID",
-							"value": "pws_rosegarden"
 						}
 					]
 				}
