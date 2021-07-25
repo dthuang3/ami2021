@@ -2,14 +2,34 @@ import { weatherForecast } from "./services/weatherForecast";
 import { weatherStation } from "./services/weatherStation";
 import { promisify } from "util";
 import * as express from "express";
-const port = 3000;
-const app = express();
 import axios from "axios";
 import * as config from "config";
 import * as _ from "lodash";
 import { isValidDate, isValidLat, isValidLng } from "./utils/utils";
 import { BroadenStationSearch } from "./services/services";
 import knex from "knex";
+import * as geohash_ from "ngeohash";
+import * as redis from "redis";
+import { CustomError } from "ts-custom-error";
+let types = require("pg").types;
+
+// from npmjs.com/package/ts-custom-error
+class HttpError extends CustomError {
+  public constructor(public code: number, message?: string) {
+    super(message);
+  }
+}
+
+// convert postgres response to number
+types.setTypeParser(1700, (val) => {
+  return parseInt(val, 10);
+});
+
+const app = express();
+const port = 3000;
+const redis_port = 6379;
+const client = redis.createClient(redis_port);
+const getAsync = promisify(client.hget).bind(client);
 const myknex = knex({
   client: "pg",
   connection: {
@@ -19,13 +39,6 @@ const myknex = knex({
     database: config.get("dbConfig.database"),
   },
 });
-import * as geohash_ from "ngeohash";
-
-import redis from "redis";
-const redis_port = 6379;
-
-const client = redis.createClient(redis_port);
-const getAsync = promisify(client.hget).bind(client);
 
 app.use(express.json());
 app.use(
@@ -52,7 +65,7 @@ app.get("/weather", async (request, response) => {
       !isValidLng(request.query.lng) &&
       !!request.query.WeatherStationID;
     if (!isValidDate(request.query.date) || !(latLngOnly || weaStationOnly)) {
-      throw new Error("invalid parameters");
+      throw new HttpError(400, "Invalid parameters");
     }
     const date: string =
       request.query.date.toString().substring(0, 4) +
@@ -72,37 +85,31 @@ app.get("/weather", async (request, response) => {
       lng = _.round(request.query.lng, 4);
       location = lat + "," + lng;
     } else if (weaStationOnly) {
-      location = _.upperCase(request.query.WeatherStationID.toString());
+      location = _.toUpper(request.query.WeatherStationID.toString());
+      // wrap into function later
       const stations = await myknex("WeatherStations")
         .select("*")
         .where("weaStationID", location);
-      console.log(stations);
-      station = stations[0];
-      await myknex.raw(`SET TIME ZONE "${station.timezone}"`);
-      const a = new Date(
-        parseInt(date.substring(0, 5)),
-        parseInt(date.substring(6, 7)) - 1,
-        parseInt(date.substring(8))
-      );
-      console.log(a);
-      console.log(a.toISOString());
-      results = await myknex("Forecasts")
-        .distinct(
-          "weaStationID",
-          "minTemp",
-          "maxTemp",
-          "avgTemp",
-          "pop",
-          "date",
-          "source"
-        )
-        .where("weaStationID", location)
-        .andWhere("date", ">=", a)
-        .andWhere("source", station.country == "au" ? "BoM" : "AerisWeather")
-        .orderBy([{ column: "source", order: "desc" }, "date"]);
-      if (results) {
-        response.send(JSON.stringify({ results }, null, "\t"));
-        return;
+      // console.log(stations);
+      if (stations.length >= 1) {
+        station = stations[0];
+        //console.log(station.timezone);
+        // console.log(a);
+        // console.log(a.toISOString());
+        results = await myknex.raw(
+          `select "weaStationID", "minTemp", "maxTemp", "avgTemp", "pop", source, date AT time zone '${
+            station.timezone
+          }' AT time zone 'UTC' from public."Forecasts" where "weaStationID" LIKE '${location}' and date >= '${date}' and "source" LIKE '${
+            station.country == "au" ? "BoM" : "AerisWeather"
+          }' order by "source" desc, date limit 7;`
+        );
+        //console.log(results["rows"]);
+        //console.log(results);
+        if (results.length == 7) {
+          console.log("from db");
+          response.send({ forecast: results });
+          return;
+        }
       }
     }
 
@@ -113,7 +120,12 @@ app.get("/weather", async (request, response) => {
       config.get("AerisClient.login");
     // typing AxiosResponse<object>
     const aeris_response = await axios.get(url);
+    // checking aeris response
+    if (aeris_response["data"]["error"] != null) {
+      throw new HttpError(502, "Bad Gateway: no forecast");
+    }
 
+    // console.log(location);
     // getting aerisweather weatherstation
     const url2: string =
       config.get("url.aeris/observations/summary") +
@@ -123,7 +135,7 @@ app.get("/weather", async (request, response) => {
 
     // ensures valid response to parse
     if (station_response["data"]["error"] != null) {
-      throw new Error("Invalid Station");
+      throw new HttpError(502, "Bad Gateway: no station");
     }
     station = {
       weaStationID: station_response["data"]["response"][0]["id"],
@@ -136,7 +148,11 @@ app.get("/weather", async (request, response) => {
         station_response["data"]["response"][0]["loc"]["long"],
         4
       ),
-      timezone: station_response["data"]["response"][0]["profile"]["tz"],
+      timezone: _.replace(
+        station_response["data"]["response"][0]["profile"]["tz"],
+        " ",
+        "_"
+      ),
     };
 
     if (weaStationOnly) {
@@ -163,7 +179,7 @@ app.get("/weather", async (request, response) => {
     if (station.country === "au") {
       // call bom using geohash
       const geohash: string = geohash_.encode(lat, lng, 7);
-      console.log(geohash);
+      // console.log(geohash);
       const url3: string =
         config.get("url.au/forecasts") + `${geohash}/forecasts/daily`;
       const bom_response = await axios.get(url3);
@@ -179,11 +195,6 @@ app.get("/weather", async (request, response) => {
         };
         bomForecast.push(forecast);
       });
-
-      // inserting avgTemp with aeris data
-      for (let i = 0; i < 7; i++) {
-        bomForecast[i].avgTemp = aerisForecast[i].avgTemp;
-      }
     }
 
     // insert weatherstation into db
@@ -197,19 +208,40 @@ app.get("/weather", async (request, response) => {
       aerisForecast,
       bomForecast
     );
+    // setting timezone
     // insert to db
     _.forEach(allForecasts, async (forecast: weatherForecast) => {
-      await myknex("Forecasts").insert(forecast);
+      const rows = await myknex("Forecasts").count("*").where({
+        weaStationID: forecast.weaStationID,
+        date: forecast.date,
+        source: forecast.source,
+      });
+      //console.log(rows);
+      if (rows[0].count == 0) {
+        console.log("inserting");
+        await myknex("Forecasts").insert(forecast);
+      } else {
+        console.log("updating");
+        await myknex("Forecasts")
+          .where("weaStationID", forecast.weaStationID)
+          .andWhere("date", forecast.date)
+          .andWhere("source", forecast.source)
+          .update({
+            minTemp: forecast.minTemp,
+            maxTemp: forecast.maxTemp,
+            avgTemp: forecast.avgTemp,
+            pop: forecast.pop,
+          });
+      }
     });
 
     response.send(
       bomForecast.length >= 1
-        ? JSON.stringify({ forecast: bomForecast }, null, "\t")
-        : JSON.stringify({ forecast: aerisForecast }, null, "\t")
+        ? { forecast: bomForecast }
+        : { forecast: aerisForecast }
     );
   } catch (err) {
-    console.error(err);
-    response.status(404).send("something went wrong");
+    response.status(err.code).send({ error: err.message });
   }
 });
 
@@ -219,7 +251,7 @@ app.get("/getNearByWeatherStation", async (request, response) => {
   try {
     // parameter validation
     if (!isValidLat(request.query.lat) || !isValidLng(request.query.lng)) {
-      throw new Error("invalid location");
+      throw new HttpError(400, "Bad Request: Lnvalid location");
     }
 
     // if lat/lng pair was recently called - retrieve station info from cache
@@ -229,7 +261,7 @@ app.get("/getNearByWeatherStation", async (request, response) => {
       "stations",
       `${_.round(request.query.lat, 4)},${_.round(request.query.lng, 4)}`
     );
-    console.log(foo);
+    // console.log(foo);
     if (foo) {
       response.send(JSON.parse(foo));
       return;
@@ -250,8 +282,7 @@ app.get("/getNearByWeatherStation", async (request, response) => {
       response.send(station_info);
     }
   } catch (err) {
-    console.error(err);
-    response.status(404).send("error");
+    response.status(err.code).send({ error: err.message });
   }
 });
 
