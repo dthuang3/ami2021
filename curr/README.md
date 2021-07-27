@@ -6,7 +6,7 @@ This is a skeleton implementation of the inclusion of local Australia weather da
 
 There are two GET requests from this API: /weather and /getNearByWeatherStation.
 
-`GET /weather`
+### `GET /weather`
 
 Returns a 7-day forecast for a given location.
 
@@ -114,7 +114,7 @@ forecast[].date | (string) | iso string of date in time local to the weather sta
 ```
 
 
-`GET /getNearByWeatherStation`
+### `GET /getNearByWeatherStation`
 
 Returns a list of closest weather stations within 20 miles. If no weather stations are found, it will continue increasing the search radius by 10 miles until a weather station is found or when the radius reaches 100 miles.
 
