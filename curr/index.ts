@@ -99,7 +99,7 @@ app.get("/weather", async (request, response) => {
         results = await myknex.raw(
           `select "weaStationID", "minTemp", "maxTemp", "avgTemp", "pop", source, date AT time zone '${
             station.timezone
-          }' AT time zone 'UTC' from public."Forecasts" where "weaStationID" LIKE '${location}' and date >= '${date}' and "source" LIKE '${
+          }' AT time zone 'UTC' as date from public."Forecasts" where "weaStationID" LIKE '${location}' and date >= '${date}' and "source" LIKE '${
             station.country == "au" ? "BoM" : "AerisWeather"
           }' order by "source" desc, date limit 7;`
         );
@@ -107,7 +107,7 @@ app.get("/weather", async (request, response) => {
         //console.log(results);
         if (results["rowCount"] == 7) {
           console.log("from db");
-          response.send({ forecast: results });
+          response.send({ forecast: results["rows"] });
           return;
         }
       }
@@ -291,7 +291,7 @@ app.get("/getNearByWeatherStation", async (request, response) => {
         `${_.round(request.query.lat, 4)},${_.round(request.query.lng, 4)}`,
         JSON.stringify(station_info)
       );
-      response.send(station_info);
+      response.send({stations: station_info});
     }
   } catch (err) {
     response.status(err.code).send({ error: err.message });

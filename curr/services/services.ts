@@ -17,16 +17,16 @@ export const BroadenStationSearch = async (
     return station_info_response;
   }
 
-  const params = `?p=${_.round(lat, 4)},${_.round(lng,4)}&limit=20&radius=${radius}&`;
+  const params = `?filter=allstations&p=${_.round(lat, 4)},${_.round(lng,4)}&limit=20&radius=${radius}&`;
   const url = config.get("url.aeris/observations/summary") + params + config.get("AerisClient.login");
   console.log("searching at " + radius + "miles");
   const json = await axios.get(url);
-  console.log(json["data"]["response"]);
+  //console.log(json["data"]["response"]);
   const station_info = _.map(json["data"]["response"], (station) => {
     return {
       WeaStationID: station.id,
       country: station.place.country,
-      isPWS: _.startsWith(station.id, "pws"),
+      isPWS: _.startsWith(station.id, "PWS"),
       lat: _.round(station.loc.lat, 4),
       lng: _.round(station.loc.long, 4),
     };
